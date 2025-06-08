@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  postgres_db:
+    image: postgres:latest
+    container_name: footbal_match_predict # Tên cố định dễ nhận diện
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD} # Lấy mật khẩu từ file .env
+      POSTGRES_USER: ${DB_USER:-postgres} # Lấy user từ file .env hoặc dùng mặc định
+      POSTGRES_DB: ${DB_NAME:-mydatabase} # Lấy tên DB từ file .env hoặc dùng mặc định
+    ports:
+      - "${HOST_POSTGRES_PORT:-5432}:5432" # Ánh xạ cổng: Host (lấy từ .env hoặc mặc định 5432) -> Container 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
