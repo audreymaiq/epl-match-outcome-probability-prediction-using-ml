@@ -1,3 +1,20 @@
-# Environment variables
-1. .env 
-2. venv/
+# Ignore all virtual environments
+venv/
+ai-engine/venv/
+
+# Ignore environment files
+.env
+ai-engine/.env
+
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.pkl
+*.sqlite3
+
+# VSCode and Jupyter
+.vscode/
+.ipynb_checkpoints/
+
