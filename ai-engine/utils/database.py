@@ -1,6 +1,6 @@
 # utils/database.py
 from sqlalchemy import create_engine, text
-from config import DB_CONFIG
+from config.config import DB_CONFIG
 
 _engine = None
 

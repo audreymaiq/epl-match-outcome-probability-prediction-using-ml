@@ -6,7 +6,7 @@ import requests
 import json
 import time
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception, before_sleep_log
-from config import API_FOOTBALL_CONFIG
+from config.config import API_FOOTBALL_CONFIG
 
 logger = logging.getLogger(__name__)
 

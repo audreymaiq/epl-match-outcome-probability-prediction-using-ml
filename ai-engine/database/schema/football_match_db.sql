@@ -538,8 +538,28 @@ COMMENT ON COLUMN "RefereeStats"."match_date_ref" IS 'Stats calculated using mat
 ALTER TABLE "RefereeStats" ADD FOREIGN KEY ("referee_id") REFERENCES "Referees" ("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE INDEX ON "RefereeStats" ("match_date_ref");
 
--- 20. INDEXES (đã tạo kèm các bảng)
--- Đảm bảo các index trên FK và cột tham chiếu đã được tạo phía trên.
+-- 20. External mapping tables
+CREATE TABLE "ExternalMapping" (
+    id SERIAL PRIMARY KEY,
+    -- ID từ hệ thống ngoài (API/scraping)
+    external_id VARCHAR(100) NOT NULL,
+    -- ID nội bộ trong hệ thống (FK tới bảng thực thể nội bộ)
+    internal_id INTEGER NOT NULL, -- References the primary key of the internal entity table specified by entity_type (e.g., Teams, Players, Matches, etc.)
+    -- Loại thực thể được ánh xạ (team/player/match/stadium/...)
+    entity_type VARCHAR(30) NOT NULL CHECK (
+        entity_type IN ('team', 'player', 'match', 'stadium', 'league', 'referee')
+    ),
+    -- Nguồn dữ liệu: API-Football, Sofascore, Transfermarkt, manual,...
+    source_system VARCHAR(50) NOT NULL,
+    -- Mô tả thêm (nếu cần phân biệt nhiều hơn, ví dụ: API version, URL gốc,...)
+    source_detail TEXT,
+    -- Dấu thời gian
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+    -- Không cho phép ánh xạ trùng (cùng external_id + entity_type + source)
+    CONSTRAINT unique_external_mapping UNIQUE (external_id, entity_type, source_system)
+);
+COMMENT ON TABLE "ExternalMapping" IS 'Bảng ánh xạ ID từ hệ thống ngoài (API/scraping) tới ID nội bộ trong hệ thống.';
 
 -- 21. MỘT SỐ LƯU Ý KHI DÙNG SCHEMA NÀY:
 -- - Khi ETL dữ liệu, hãy đảm bảo time cutoff: aggregated stats tính trước ngày match_datetime (ví dụ match_date_ref = date(match_datetime) - 1).
