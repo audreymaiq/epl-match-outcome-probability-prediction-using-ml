@@ -6,6 +6,10 @@ ai-engine/venv/
 .env
 ai-engine/.env
 
+# Ignore folder
+materials/
+report/
+
 # Python cache & compiled files
 __pycache__/
 *.py[cod]
