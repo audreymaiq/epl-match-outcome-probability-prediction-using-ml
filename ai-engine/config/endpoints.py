@@ -1,4 +1,7 @@
 # endpoints.py
+
+from datetime import datetime
+
 # Tất cả endpoint cần thiết cho schema
 API_ENDPOINTS = {
     # Leagues (Bảng Leagues)
@@ -23,7 +26,7 @@ API_ENDPOINTS = {
     "PLAYERS_TOPREDCARDS": "players/topredcards",
     
     # Referees (Bảng Referees)
-    "REFEREES": "coachs",  # API sử dụng endpoint 'coachs' cho trọng tài
+    # Referees are extracted from the "referee" field in the /fixtures endpoint.
     
     # Matches (Bảng Matches)
     "FIXTURES": "fixtures",
@@ -66,18 +69,6 @@ POSITION_MAPPING = {
     "Defender": "DEF",
     "Midfielder": "MID",
     "Attacker": "FWD",
-    "Center Back": "CB",
-    "Left Back": "LB",
-    "Right Back": "RB",
-    "Defensive Midfield": "DM",
-    "Central Midfield": "CM",
-    "Attacking Midfield": "AM",
-    "Left Midfield": "LM",
-    "Right Midfield": "RM",
-    "Left Wing": "LW",
-    "Right Wing": "RW",
-    "Center Forward": "CF",
-    "Second Striker": "SS"
 }
 
 # Mapping trạng thái trận đấu (Matches.status)
@@ -103,21 +94,33 @@ STATUS_MAPPING = {
 
 # Mapping loại sự kiện (MatchEvents.event_type)
 EVENT_TYPE_MAPPING = {
+    # Goal events
     "Goal": "goal",
-    "Own Goal": "own goal",
-    "Penalty": "penalty",
-    "Missed Penalty": "missed penalty",
-    "Yellow Card": "yellow card",
-    "Red Card": "red card",
-    "Second Yellow card": "red card",  # 2 thẻ vàng = thẻ đỏ
+    "Normal Goal": "goal",           # Bàn thắng thông thường
+    "Own Goal": "own_goal",          # Bàn phản lưới nhà
+    "Penalty": "penalty_goal",       # Bàn thắng từ penalty
+    "Missed Penalty": "missed_penalty", # Penalty hỏng
+
+    # Card events
+    "Yellow Card": "yellow_card",
+    "Red Card": "red_card",
+    "Second Yellow card": "second_yellow", # 2 thẻ vàng = thẻ đỏ
+
+    # Substitution
     "Substitution": "substitution",
-    "Var": "foul",          # VAR decision
+
+    # VAR decisions
+    "Goal cancelled": "goal_cancelled",   # VAR hủy bàn thắng
+    "Penalty confirmed": "penalty_confirmed", # VAR xác nhận penalty
+
+    # Match flow events
     "Foul": "foul",
     "Corner": "corner",
     "Offside": "offside",
-    "Hand ball": "foul",
-    "Free Kick": "foul",
-    "Injury": "foul"
+    "Hand ball": "handball",
+    "Free Kick": "free_kick",
+    "Injury": "injury",
+    "Injury Time": "injury_time",
 }
 
 # Mapping giai đoạn trận đấu (MatchEvents.period)
