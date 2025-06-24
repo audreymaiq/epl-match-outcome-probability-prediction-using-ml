@@ -37,7 +37,7 @@ def load_environment(
     """
     # 1. Xác định môi trường hiện tại
     env_name = os.getenv("ENVIRONMENT", "development").strip().lower()
-    logger.info(f"🔍 Chuẩn bị load cấu hình cho môi trường: {env_name}")
+    logger.info(f"Chuẩn bị load cấu hình cho môi trường: {env_name}")
 
     # 2. Xác định danh sách file ứng viên
     if env_path:
@@ -110,7 +110,7 @@ def load_environment(
             missing_vars.append(var)
 
     if missing_vars:
-        msg = f"🚨 Thiếu biến môi trường bắt buộc: {', '.join(missing_vars)}"
+        msg = f"Thiếu biến môi trường bắt buộc: {', '.join(missing_vars)}"
         logger.critical(msg)
         # Xác định production qua env_name
         is_production = env_name in ["production", "prod"]

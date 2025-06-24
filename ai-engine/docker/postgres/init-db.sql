@@ -1,6 +1,6 @@
 -- ai-engine\docker\postgres\init-db.sql
 
--- 2. CREATE TYPE ENUMs
+-- 1. CREATE TYPE ENUMs
 CREATE TYPE "MatchOutcome" AS ENUM ('H', 'D', 'A');
 
 CREATE TYPE "MatchStatus" AS ENUM ('SCHEDULED', 'FINISHED', 'POSTPONED', 'CANCELLED' /*, 'IN_PROGRESS' nếu cần realtime*/);
@@ -16,7 +16,7 @@ CREATE TYPE "MatchEventType" AS ENUM (
 
 CREATE TYPE "MatchPeriod" AS ENUM ('1H', '2H', 'ET1', 'ET2', 'PEN');
 
--- 3. Bảng Leagues
+-- 2. Bảng Leagues
 CREATE TABLE "Leagues" (
   "id" SERIAL PRIMARY KEY,
   "name" VARCHAR(255) UNIQUE NOT NULL,
@@ -28,7 +28,7 @@ COMMENT ON TABLE "Leagues" IS 'Information about football leagues.';
 COMMENT ON COLUMN "Leagues"."created_at" IS 'Record creation timestamp';
 
 
--- 5. Bảng Stadiums
+-- 3. Bảng Stadiums
 CREATE TABLE "Stadiums" (
   "id" SERIAL PRIMARY KEY,
   "name" VARCHAR(255) UNIQUE NOT NULL,
@@ -43,7 +43,7 @@ COMMENT ON COLUMN "Stadiums"."timezone" IS 'Timezone of stadium, helpful for con
 COMMENT ON COLUMN "Stadiums"."created_at" IS 'Record creation timestamp';
 COMMENT ON COLUMN "Stadiums"."updated_at" IS 'When this record was last updated';
 
--- 6. Bảng Teams
+-- 4. Bảng Teams
 CREATE TABLE "Teams" (
   "id" SERIAL PRIMARY KEY,
   "name" VARCHAR(255) UNIQUE NOT NULL,
@@ -60,7 +60,7 @@ COMMENT ON COLUMN "Teams"."updated_at" IS 'When this record was last updated';
 
 ALTER TABLE "Teams" ADD FOREIGN KEY ("stadium_id") REFERENCES "Stadiums" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- 4. Bảng Seasons
+-- 5. Bảng Seasons
 CREATE TABLE "Seasons" (
   "id" SERIAL PRIMARY KEY,
   "league_id" INT NOT NULL,
@@ -92,7 +92,7 @@ ALTER TABLE "Seasons" ADD FOREIGN KEY ("relegated_team_2") REFERENCES "Teams" ("
 ALTER TABLE "Seasons" ADD FOREIGN KEY ("relegated_team_3") REFERENCES "Teams" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
 CREATE UNIQUE INDEX ON "Seasons" ("league_id", "name");
 
--- 7. Bảng Referees
+-- 6. Bảng Referees
 CREATE TABLE "Referees" (
   "id" SERIAL PRIMARY KEY,
   "name" VARCHAR(255) NOT NULL,
@@ -104,7 +104,7 @@ CREATE TABLE "Referees" (
 COMMENT ON TABLE "Referees" IS 'Information about football referees.';
 COMMENT ON COLUMN "Referees"."created_at" IS 'Record creation timestamp';
 
--- 8. Bảng Players
+-- 7. Bảng Players
 CREATE TABLE "Players" (
   "id" SERIAL PRIMARY KEY,
   "name" VARCHAR(255) NOT NULL,
@@ -119,7 +119,7 @@ COMMENT ON TABLE "Players" IS 'Information about football players.';
 COMMENT ON COLUMN "Players"."created_at" IS 'Record creation timestamp';
 COMMENT ON COLUMN "Players"."updated_at" IS 'When this record was last updated';
 
--- 9. Bảng Matches
+-- 8. Bảng Matches
 CREATE TABLE "Matches" (
   "id" SERIAL PRIMARY KEY,
   "season_id" INT NOT NULL,
@@ -165,7 +165,7 @@ CREATE INDEX ON "Matches" ("home_team_id", "match_datetime");
 CREATE INDEX ON "Matches" ("away_team_id", "match_datetime");
 CREATE INDEX ON "Matches" ("match_datetime");
 
--- 10. Bảng MatchEvents
+-- 9. Bảng MatchEvents
 CREATE TABLE "MatchEvents" (
   "id" SERIAL PRIMARY KEY,
   "match_id" INT NOT NULL,
@@ -194,7 +194,7 @@ CREATE INDEX ON "MatchEvents" ("match_id");
 CREATE INDEX ON "MatchEvents" ("event_type");
 CREATE INDEX ON "MatchEvents" ("player_id");
 
--- 11. Bảng MatchPlayerStats
+-- 10. Bảng MatchPlayerStats
 CREATE TABLE "MatchPlayerStats" (
   "id" SERIAL PRIMARY KEY,
   "match_id" INT NOT NULL,
@@ -248,7 +248,7 @@ ALTER TABLE "MatchPlayerStats" ADD FOREIGN KEY ("player_id") REFERENCES "Players
 CREATE INDEX ON "MatchPlayerStats" ("match_id", "team_id");
 CREATE INDEX ON "MatchPlayerStats" ("player_id");
 
--- 12. Bảng MatchTeamStats
+-- 11. Bảng MatchTeamStats
 CREATE TABLE "MatchTeamStats" (
   "id" SERIAL PRIMARY KEY,
   "match_id" INT NOT NULL,
@@ -288,7 +288,7 @@ ALTER TABLE "MatchTeamStats" ADD FOREIGN KEY ("team_id") REFERENCES "Teams" ("id
 CREATE INDEX ON "MatchTeamStats" ("match_id");
 CREATE INDEX ON "MatchTeamStats" ("team_id");
 
--- 13. Bảng SquadAvailability
+-- 12. Bảng SquadAvailability
 CREATE TABLE "SquadAvailability" (
   "id" SERIAL PRIMARY KEY,
   "match_id" INT NOT NULL,
@@ -309,7 +309,7 @@ ALTER TABLE "SquadAvailability" ADD FOREIGN KEY ("player_id") REFERENCES "Player
 
 CREATE INDEX ON "SquadAvailability" ("match_id", "team_id");
 
--- 14. Bảng Lineups
+-- 13. Bảng Lineups
 CREATE TABLE "Lineups" (
   "id" SERIAL PRIMARY KEY,
   "match_id" INT NOT NULL,
@@ -339,7 +339,7 @@ ALTER TABLE "Lineups" ADD FOREIGN KEY ("player_id") REFERENCES "Players" ("id") 
 CREATE INDEX ON "Lineups" ("match_id", "team_id");
 CREATE INDEX ON "Lineups" ("player_id");
 
--- 15. Bảng TeamSeasonLocationStats
+-- 14. Bảng TeamSeasonLocationStats
 CREATE TABLE "TeamSeasonLocationStats" (
   "id" SERIAL PRIMARY KEY,
   "team_id" INT NOT NULL,
@@ -377,7 +377,7 @@ ALTER TABLE "TeamSeasonLocationStats" ADD FOREIGN KEY ("season_id") REFERENCES "
 
 CREATE INDEX ON "TeamSeasonLocationStats" ("match_date_ref");
 
--- 16. Bảng TeamFormStats
+-- 15. Bảng TeamFormStats
 CREATE TABLE "TeamFormStats" (
   "id" SERIAL PRIMARY KEY,
   "team_id" INT NOT NULL,
@@ -412,7 +412,7 @@ ALTER TABLE "TeamFormStats" ADD FOREIGN KEY ("team_id") REFERENCES "Teams" ("id"
 
 CREATE INDEX ON "TeamFormStats" ("match_date_ref");
 
--- 17. Bảng PlayerSeasonStats
+-- 16. Bảng PlayerSeasonStats
 CREATE TABLE "PlayerSeasonStats" (
   "id" SERIAL PRIMARY KEY,
   "player_id" INT NOT NULL,
@@ -442,7 +442,7 @@ ALTER TABLE "PlayerSeasonStats" ADD FOREIGN KEY ("season_id") REFERENCES "Season
 
 CREATE INDEX ON "PlayerSeasonStats" ("match_date_ref");
 
--- 18. Bảng HeadToHeadStats
+-- 17. Bảng HeadToHeadStats
 CREATE TABLE "HeadToHeadStats" (
   "id" SERIAL PRIMARY KEY,
   "home_team_id" INT NOT NULL,
@@ -481,7 +481,7 @@ CREATE INDEX ON "HeadToHeadStats" ("home_team_id", "away_team_id");
 CREATE INDEX ON "HeadToHeadStats" ("match_date_ref");
 CREATE INDEX ON "HeadToHeadStats" USING GIN ("last_5_encounters");
 
--- 19. Bảng BettingOdds
+-- 18. Bảng BettingOdds
 CREATE TABLE "BettingOdds" (
   "id" SERIAL PRIMARY KEY,
   "match_id" INT NOT NULL,

@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 from enum import Enum
 
 class APIFootballEndpoints(Enum):
-    """Danh sách các endpoint của API-Football theo tài liệu chính thức"""
+    """Danh sách các endpoint của API-Football v3 theo tài liệu chính thức"""
     TIMEZONES = "/timezone"
     COUNTRIES = "/countries"
     LEAGUES = "/leagues"
@@ -30,7 +30,7 @@ class APIFootballEndpoints(Enum):
     PLAYERS_TOPREDCARDS = "/players/topredcards"
     STANDINGS = "/standings"
     VENUES = "/venues"
-    COACHES = "/coaches"
+    COACHES = "/coachs"  # Note: API path is /coachs but enum name should be COACHES
     TRANSFERS = "/transfers"
     TROPHIES = "/trophies"
     SIDELINED = "/sidelined"
@@ -42,13 +42,11 @@ class APIFootballEndpoints(Enum):
     ODDS_LIVE_BETS = "/odds/live/bets"
     INJURIES = "/injuries"
     PREDICTIONS = "/predictions"
-    MY_API_PLANS = "/my-api-plans"
 
     @classmethod
     def from_string(cls, value: str):
         """
-        Chuyển đổi chuỗi thành Enum member.
-        Hỗ trợ case-insensitive: sẽ strip và uppercase trước khi lookup.
+        Chuyển đổi chuỗi thành Enum member (case-insensitive key lookup).
         """
         if not isinstance(value, str):
             raise ValueError(f"Endpoint key phải là string, nhận: {type(value)}")
@@ -56,83 +54,105 @@ class APIFootballEndpoints(Enum):
         try:
             return cls[key]
         except KeyError:
-            raise ValueError(f"Invalid endpoint: {value!r}. Valid keys: {list(cls.__members__.keys())}")
+            valid = ', '.join(cls.__members__.keys())
+            raise ValueError(f"Invalid endpoint: {value!r}. Valid keys: {valid}")
 
 class APIFootballConfig:
     """
-    Cấu hình cơ bản cho API-Football: BASE_URL, rate limits.
-    Nếu bạn gọi direct API-Football (không qua RapidAPI), HEADER sẽ dùng x-apisports-key.
-    Nếu bạn gọi qua RapidAPI marketplace, client sẽ tự thêm x-rapidapi-key + x-rapidapi-host.
+    Cấu hình cơ bản cho API-Football: BASE_URL, rate limits và headers.
     """
-    # Ví dụ BASE_URL của API-Football (direct):
     BASE_URL = "https://v3.football.api-sports.io"
 
-    # Rate limits giả định: requests per second.
-    # Bạn có thể điều chỉnh theo tài liệu API thực tế hoặc cấu hình từ ngoài.
+    # Rate limits (requests per second) theo đặc tả của API
+    # Lưu ý: Giá trị này có thể cần điều chỉnh theo plan subscription
     RATE_LIMITS = {
-        "DEFAULT": 10,         # mặc định 10 req/s
-        "FIXTURES_LIVE": 4,    # endpoint liên quan live fixtures giới hạn 4 req/s
+        "DEFAULT": 1,  # Conservative default - adjust based on your plan
+        "PREMIUM": 10,  # For premium subscriptions
+        # Các endpoint live (cập nhật liên tục) có giới hạn thấp hơn
+        "FIXTURES_LIVE": 1,
+        "ODDS_LIVE": 1
     }
 
-    # Nếu bạn dùng direct API-Football: có thể lấy 1 key từ env để test:
-    # Nhưng trong client, thường dùng config.API.KEYS (list). Phần này chỉ làm ví dụ hoặc fallback.
-    # Nếu không dùng hoặc không muốn raise ở đây, có thể bỏ phần raise.
-    API_KEY = os.getenv("API_FOOTBALL_KEY")
-    if not API_KEY:
-        # Nếu bạn không cần enforce env ở đây, có thể comment dòng raise sau:
-        # raise EnvironmentError("Missing API_FOOTBALL_KEY environment variable.")
-        pass
+    # API key (dùng direct API-Football)
+    API_KEY = os.getenv("API_FOOTBALL_KEY", "")
 
-    # DEFAULT_HEADERS chỉ là ví dụ: nếu direct, header dùng x-apisports-key.
-    # Nếu gọi qua RapidAPI, client sẽ tự set header phù hợp, không phụ thuộc DEFAULT_HEADERS này.
+    # Header mặc định cho direct API-Football
     DEFAULT_HEADERS = {
-        "x-apisports-key": API_KEY or "",
-        # "x-rapidapi-host": "v3.football.api-sports.io",  # Chỉ dùng nếu gọi qua RapidAPI
-        "Accept-Encoding": "gzip",
+        "x-apisports-key": API_KEY,
+        "Accept-Encoding": "gzip"
     }
 
-# Mapping từ endpoint.value (chuỗi path) sang key trong RATE_LIMITS nếu cần khác default
+    @classmethod
+    def validate_config(cls):
+        """Validate configuration settings"""
+        if not cls.API_KEY:
+            raise ValueError("API_FOOTBALL_KEY environment variable is required")
+        return True
+
+# Mapping endpoint path → rate limit group
 RATE_LIMIT_ENDPOINT_MAPPING = {
     APIFootballEndpoints.FIXTURES.value: "FIXTURES_LIVE",
     APIFootballEndpoints.FIXTURES_EVENTS.value: "FIXTURES_LIVE",
     APIFootballEndpoints.FIXTURES_STATISTICS.value: "FIXTURES_LIVE",
     APIFootballEndpoints.FIXTURES_LINEUPS.value: "FIXTURES_LIVE",
     APIFootballEndpoints.FIXTURES_PLAYERS.value: "FIXTURES_LIVE",
-    APIFootballEndpoints.ODDS_LIVE.value: "FIXTURES_LIVE",
-    APIFootballEndpoints.ODDS_LIVE_BETS.value: "FIXTURES_LIVE",
-    # Nếu cần map thêm, bổ sung tương tự
+    APIFootballEndpoints.ODDS_LIVE.value: "ODDS_LIVE",
+    APIFootballEndpoints.ODDS_LIVE_BETS.value: "ODDS_LIVE"
 }
+
 
 def build_url(endpoint: APIFootballEndpoints, params: dict = None) -> str:
     """
     Xây dựng URL đầy đủ cho yêu cầu API.
-    - endpoint: Enum APIFootballEndpoints
-    - params: dict tham số query string
+    - endpoint: member của APIFootballEndpoints
+    - params: dict các tham số query string
     """
     if not isinstance(endpoint, APIFootballEndpoints):
         raise TypeError(f"endpoint phải là APIFootballEndpoints, nhận: {type(endpoint)}")
-    path = endpoint.value
-    base = APIFootballConfig.BASE_URL.rstrip("/")  # đảm bảo không dư slash
-    url = f"{base}{path}"
+    
+    base = APIFootballConfig.BASE_URL.rstrip('/')
+    url = f"{base}{endpoint.value}"
+    
     if params:
-        # urlencode với doseq=True để hỗ trợ list params
-        query = urlencode(params, doseq=True)
-        url = f"{url}?{query}"
+        # Filter out None values and empty strings
+        clean_params = {k: v for k, v in params.items() if v is not None and v != ""}
+        if clean_params:
+            qs = urlencode(clean_params, doseq=True)
+            url = f"{url}?{qs}"
+    
     return url
+
 
 def get_rate_limit(endpoint: APIFootballEndpoints) -> int:
     """
-    Lấy giới hạn requests/giây cho endpoint cụ thể.
-    Nếu không có mapping riêng, trả về DEFAULT.
+    Lấy giới hạn requests/giây cho endpoint.
+    Nếu không có quy định riêng, trả về DEFAULT.
     """
     if not isinstance(endpoint, APIFootballEndpoints):
         raise TypeError(f"endpoint phải là APIFootballEndpoints, nhận: {type(endpoint)}")
+    
     key = RATE_LIMIT_ENDPOINT_MAPPING.get(endpoint.value, "DEFAULT")
-    # đảm bảo luôn có giá trị > 0; nếu không tìm thấy, fallback DEFAULT
-    limit = APIFootballConfig.RATE_LIMITS.get(key)
-    if limit is None:
-        limit = APIFootballConfig.RATE_LIMITS.get("DEFAULT", 1)
-    # Nếu limit <= 0, đặt lại thành 1 để tránh ZeroDivisionError
-    if not isinstance(limit, (int, float)) or limit <= 0:
-        limit = APIFootballConfig.RATE_LIMITS.get("DEFAULT", 1)
-    return limit
+    limit = APIFootballConfig.RATE_LIMITS.get(key, APIFootballConfig.RATE_LIMITS["DEFAULT"])
+    
+    try:
+        val = int(limit)
+        return max(val, 1)  # Minimum 1 request per second
+    except (ValueError, TypeError):
+        return APIFootballConfig.RATE_LIMITS["DEFAULT"]
+
+
+def is_live_endpoint(endpoint: APIFootballEndpoints) -> bool:
+    """
+    Kiểm tra xem endpoint có phải là live endpoint không.
+    Live endpoints thường có rate limit thấp hơn.
+    """
+    live_endpoints = {
+        APIFootballEndpoints.FIXTURES,
+        APIFootballEndpoints.FIXTURES_EVENTS,
+        APIFootballEndpoints.FIXTURES_STATISTICS,
+        APIFootballEndpoints.FIXTURES_LINEUPS,
+        APIFootballEndpoints.FIXTURES_PLAYERS,
+        APIFootballEndpoints.ODDS_LIVE,
+        APIFootballEndpoints.ODDS_LIVE_BETS
+    }
+    return endpoint in live_endpoints

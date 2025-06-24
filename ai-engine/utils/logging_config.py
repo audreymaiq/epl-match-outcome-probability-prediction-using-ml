@@ -1,21 +1,20 @@
-# ai-engine\utils\logging_config.py
-
 import logging
 import logging.config
 import os
 import sys
 from pathlib import Path
 import datetime
-from pythonjsonlogger import jsonlogger 
+from pythonjsonlogger import jsonlogger
 import threading
 from queue import Queue, Empty
 import atexit
 
 # Global setup flag
 _LOGGING_SETUP = False
-_log_queue = Queue()
+_log_queue = Queue(maxsize=1000)
 _log_worker_thread = None
 _log_listener = None
+
 
 class SafeLogFormatter(jsonlogger.JsonFormatter):
     """JSON formatter với redaction thông tin nhạy cảm toàn diện"""
@@ -31,9 +30,8 @@ class SafeLogFormatter(jsonlogger.JsonFormatter):
         super().add_fields(log_record, record, message_dict)
         
         # Thống nhất biến môi trường
-        env = os.getenv("ENVIRONMENT", "unknown")
         log_record["service"] = "premier-league-pipeline"
-        log_record["environment"] = env
+        log_record["environment"] = os.getenv("ENVIRONMENT", "unknown")
         log_record["host"] = os.getenv("HOSTNAME", "unknown")
         
         # Timestamp UTC chính xác
@@ -58,6 +56,7 @@ class SafeLogFormatter(jsonlogger.JsonFormatter):
                 if any(kw in value_lower for kw in self.sensitive_keywords):
                     record[key] = "***REDACTED***"
 
+
 class QueueLogHandler(logging.Handler):
     """Handler đẩy log vào queue để xử lý bất đồng bộ"""
     
@@ -72,11 +71,12 @@ class QueueLogHandler(logging.Handler):
                 self.queue.get_nowait()
             self.queue.put_nowait(record)
         except Exception:
-            # Fallback cứng ra stderr
+            # Fallback cứng ra stderr với bảo vệ tốt hơn
             try:
-                sys.stderr.write(f"Log queue overflow: {record.msg[:100]}\n")
+                sys.stderr.write(f"Log queue overflow: {record.getMessage()[:100]}\n")
             except:
-                pass
+                pass  # Silent fallback nếu stderr cũng fail
+
 
 def _log_worker_func():
     """Worker xử lý log từ queue bất đồng bộ"""
@@ -85,7 +85,7 @@ def _log_worker_func():
             record = _log_queue.get(timeout=1.0)
             if record is None:  # Tín hiệu dừng
                 break
-                
+            
             logger = logging.getLogger(record.name)
             # Xử lý log gốc không qua queue
             if not getattr(record, 'from_worker', False):
@@ -96,6 +96,7 @@ def _log_worker_func():
             continue
         except Exception as e:
             sys.stderr.write(f"Log worker error: {str(e)}\n")
+
 
 def setup_logging(log_dir: str = None, log_level: str = None):
     global _LOGGING_SETUP, _log_worker_thread, _log_listener
@@ -108,9 +109,13 @@ def setup_logging(log_dir: str = None, log_level: str = None):
     log_level = log_level or os.getenv("LOG_LEVEL", "INFO")
     env = os.getenv("ENVIRONMENT", "dev").lower()
     
-    # Tạo thư mục log
+    # Tạo thư mục log với fallback (kết hợp ưu điểm đoạn 1)
     log_path = Path(log_dir)
-    log_path.mkdir(parents=True, exist_ok=True)
+    try:
+        log_path.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        log_path = Path("/tmp/logs")
+        log_path.mkdir(parents=True, exist_ok=True)
     
     # Cấu hình handlers
     handlers = {}
@@ -123,7 +128,7 @@ def setup_logging(log_dir: str = None, log_level: str = None):
         "formatter": "standard"
     }
     handlers["console"] = console_handler
-
+    
     # File handlers (không dùng trong test)
     if env != "test":
         # Main log file
@@ -149,7 +154,7 @@ def setup_logging(log_dir: str = None, log_level: str = None):
             "formatter": "json" if env == "production" else "standard"
         }
         handlers["error_file"] = error_handler
-
+    
     # Formatters
     formatters = {
         "standard": {
@@ -201,7 +206,7 @@ def setup_logging(log_dir: str = None, log_level: str = None):
             sentry_sdk.init(
                 dsn=os.getenv("SENTRY_DSN"),
                 integrations=[sentry_logging],
-                traces_sample_rate=0.1,
+                traces_sample_rate=0.1,  # Tối ưu performance
                 environment=env
             )
             
@@ -251,6 +256,7 @@ def setup_logging(log_dir: str = None, log_level: str = None):
     
     _LOGGING_SETUP = True
 
+
 def teardown_logging():
     """Dọn dẹp tài nguyên logging khi kết thúc ứng dụng"""
     global _log_queue, _log_worker_thread, _log_listener, _LOGGING_SETUP
@@ -291,7 +297,7 @@ def teardown_logging():
             # Ghi log shutdown
             logging.info("Flushing final logs before shutdown")
             logging.shutdown()
-            
+    
     except Exception as e:
         sys.stderr.write(f"Log teardown error: {str(e)}\n")
     finally:
