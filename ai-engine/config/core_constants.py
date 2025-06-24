@@ -6,6 +6,7 @@ class MatchStatus:
     FINISHED = "FINISHED"
     POSTPONED = "POSTPONED"
     CANCELLED = "CANCELLED"
+    UNKNOWN = "UNKNOWN"
 
 # Mapping từ giá trị API sang MatchStatus
 API_STATUS_MAPPING = {
@@ -16,6 +17,7 @@ API_STATUS_MAPPING = {
     "ET": MatchStatus.IN_PROGRESS,
     "P": MatchStatus.IN_PROGRESS,
     "BT": MatchStatus.IN_PROGRESS,
+    "LIVE": MatchStatus.IN_PROGRESS,
     "FT": MatchStatus.FINISHED,
     "AET": MatchStatus.FINISHED,
     "PEN": MatchStatus.FINISHED,
@@ -33,6 +35,7 @@ class PlayerPosition:
     DEF = "DEF"
     MID = "MID"
     FWD = "FWD"
+    UNKNOWN = "UNKNOWN"
 
 # Mapping từ mô tả API sang PlayerPosition
 API_POSITION_MAPPING = {
@@ -47,6 +50,7 @@ class MatchOutcome:
     HOME = "H"
     DRAW = "D"
     AWAY = "A"
+    UNKNOWN = "UNKNOWN"
 
 API_OUTCOME_MAPPING = {
     "Home": MatchOutcome.HOME,

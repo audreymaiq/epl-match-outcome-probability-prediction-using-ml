@@ -6,6 +6,7 @@ ai-engine/
     requirements.txt
     config/
         business_constants.py
+        core_constants.py
         env_loader.py
         field_mappings.py
         settings.py

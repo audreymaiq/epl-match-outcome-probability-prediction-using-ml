@@ -1,16 +1,27 @@
 # ai-engine/config/field_mappings.py
 
-from datetime import datetime
+from datetime import datetime, date
+import pytz
+from dateutil import parser
 from .core_constants import API_POSITION_MAPPING, API_STATUS_MAPPING, API_OUTCOME_MAPPING
+
+# Hàm helper cho mapping an toàn
+def safe_mapping(mapping, default="UNKNOWN"):
+    def mapper(value):
+        return mapping.get(value, default)
+    return mapper
 
 # Mapping vị trí cầu thủ từ API sang schema
 POSITION_MAPPING = {key: value.value for key, value in API_POSITION_MAPPING.items()}
+position_mapper = safe_mapping(POSITION_MAPPING, "UNKNOWN")
 
 # Mapping trạng thái trận đấu
 STATUS_MAPPING = {api_code: status.value for api_code, status in API_STATUS_MAPPING.items()}
+status_mapper = safe_mapping(STATUS_MAPPING, "UNKNOWN")
 
 # Mapping kết quả trận đấu
 OUTCOME_MAPPING = {key: value.value for key, value in API_OUTCOME_MAPPING.items()}
+outcome_mapper = safe_mapping(OUTCOME_MAPPING, "UNKNOWN")
 
 # Mapping loại sự kiện (MatchEvents.event_type)
 EVENT_TYPE_MAPPING = {
@@ -32,24 +43,34 @@ EVENT_TYPE_MAPPING = {
     "Free Kick": "free_kick",
     "Injury": "injury",
     "Injury Time": "injury_time",
+    "VAR Decision": "var_decision",
+    "Goal Disallowed": "goal_disallowed"
 }
+event_type_mapper = safe_mapping(EVENT_TYPE_MAPPING, "unknown")
 
 # Mapping giai đoạn trận đấu (MatchEvents.period)
 PERIOD_MAPPING = {
     "1H": "1H",
     "2H": "2H",
+    "1H+": "1H_extra",
+    "2H+": "2H_extra",
     "ET": "ET1",
+    "ET2": "ET2",
     "P": "PEN",
-    "BT": "HT"
+    "BT": "HT",
+    "BT_ET": "BT_ET"
 }
+period_mapper = safe_mapping(PERIOD_MAPPING, "UNKNOWN")
 
 # Mapping tình trạng cầu thủ (SquadAvailability.status)
 PLAYER_STATUS_MAPPING = {
     "Missing Fixture": "Injured",
     "Questionable": "Doubtful",
     "Suspended": "Suspended",
-    "Not Available": "Away on Intl Duty"
+    "Not Available": "Away on Intl Duty",
+    "Available": "Available"  # Bổ sung giá trị còn thiếu
 }
+player_status_mapper = safe_mapping(PLAYER_STATUS_MAPPING, "Available")
 
 # Mapping vị trí địa lý (TeamSeasonLocationStats.location)
 LOCATION_MAPPING = {
@@ -57,12 +78,14 @@ LOCATION_MAPPING = {
     "away": "Away",
     "total": "Overall"
 }
+location_mapper = safe_mapping(LOCATION_MAPPING, "Overall")
 
 # Mapping cho thống kê thẻ (RefereeStats)
 CARD_MAPPING = {
     "yellow": "avg_yellow_cards_per_match",
     "red": "avg_red_cards_per_match"
 }
+card_mapper = safe_mapping(CARD_MAPPING, "unknown")
 
 # Mapping cho dữ liệu bookmaker (BettingOdds)
 BOOKMAKER_MAPPING = {
@@ -81,27 +104,28 @@ BOOKMAKER_MAPPING = {
     14: "Interwetten",
     15: "Tipico"
 }
+bookmaker_mapper = safe_mapping(BOOKMAKER_MAPPING, "Unknown")
 
-# API field to database column mapping
+# API field to database column mapping - SỬA XUNG ĐỘT TÊN
 FIELD_MAPPING = {
-    "league.id": "id",
+    "league.id": "league_id",
     "league.name": "name",
     "league.country": "country",
     "league.logo": "logo_url",
-    "team.id": "id",
+    "team.id": "team_id",
     "team.name": "name",
     "team.code": "short_name",
     "team.founded": "established_year",
-    "venue.id": "id",
+    "venue.id": "venue_id",
     "venue.name": "name",
     "venue.city": "city",
     "venue.capacity": "capacity",
-    "player.id": "id",
+    "player.id": "player_id",
     "player.name": "name",
-    "player.age": "date_of_birth",
+    "player.birth.date": "date_of_birth",  # Sử dụng trường ngày sinh thay vì tuổi
     "player.height": "height",
     "player.nationality": "nationality",
-    "fixture.id": "id",
+    "fixture.id": "fixture_id",
     "fixture.date": "match_datetime",
     "fixture.referee": "referee_id",
     "teams.home.id": "home_team_id",
@@ -122,13 +146,52 @@ FIELD_MAPPING = {
     "fouls.committed": "fouls_committed",
     "cards.yellow": "yellow_cards",
     "cards.red": "red_cards",
-    "saves": "saves"
+    "saves": "saves",
+    
+    # Bổ sung các trường mới từ API document
+    "statistics.ball_possession": "possession_percentage",
+    "statistics.corner_kicks": "corners",
+    "statistics.offsides": "offsides",
+    "statistics.total_passes": "total_passes",
+    "statistics.passes_accurate": "accurate_passes",
+    "statistics.pass_accuracy%": "pass_accuracy_percent"
 }
 
-# Danh sách các trường cần chuyển đổi đặc biệt
+# Hàm chuyển đổi đặc biệt - SỬA LỖI NGHIÊM TRỌNG
+def convert_birthdate(birth_str):
+    """Chuyển đổi ngày sinh từ string sang date object"""
+    if not birth_str:
+        return None
+    try:
+        return parser.parse(birth_str).date()
+    except:
+        return None
+
+def convert_accuracy(value):
+    """Xử lý giá trị phần trăm an toàn"""
+    if value is None:
+        return 0.0
+    if isinstance(value, str):
+        clean_value = value.replace('%', '').strip()
+        return float(clean_value) / 100 if clean_value else 0.0
+    return float(value)
+
+def convert_datetime(dt_str):
+    """Chuyển đổi datetime với timezone"""
+    if not dt_str:
+        return None
+    try:
+        dt = parser.isoparse(dt_str)
+        return dt.astimezone(pytz.UTC)  # Chuyển về UTC
+    except:
+        return None
+
+# Danh sách các trường cần chuyển đổi đặc biệt - ĐÃ SỬA
 SPECIAL_CONVERSIONS = {
-    "player.age": lambda age: datetime.now().year - int(age),
-    "passes.accuracy": lambda pct: int(pct.replace('%', '')) / 100
+    "player.birth.date": convert_birthdate,
+    "passes.accuracy": convert_accuracy,
+    "statistics.pass_accuracy%": convert_accuracy,
+    "fixture.date": convert_datetime
 }
 
 # Các endpoint cần phân trang
@@ -143,9 +206,11 @@ PAGINATED_ENDPOINTS = [
 # Timezone mặc định cho dữ liệu
 DEFAULT_TIMEZONE = "UTC"
 
-# Giá trị mặc định cho các trường
+# Giá trị mặc định cho các trường - ĐÃ SỬA
 DEFAULT_VALUES = {
-    "height": 180,
-    "capacity": 10000,
-    "minutes_played": 90
+    "height": None,
+    "capacity": None,
+    "minutes_played": None,
+    "date_of_birth": None,
+    "accurate_passes": 0.0
 }

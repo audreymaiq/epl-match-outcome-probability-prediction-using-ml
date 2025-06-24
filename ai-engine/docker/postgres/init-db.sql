@@ -1,22 +1,4 @@
--- 1. DROP nếu tồn tại (tùy bạn muốn reset)
--- Lưu ý thứ tự drop: bảng con trước bảng cha.
-DROP TABLE IF EXISTS "RefereeStats";
-DROP TABLE IF EXISTS "BettingOdds";
-DROP TABLE IF EXISTS "PlayerSeasonStats";
-DROP TABLE IF EXISTS "TeamFormStats";
-DROP TABLE IF EXISTS "TeamSeasonLocationStats";
-DROP TABLE IF EXISTS "Lineups";
-DROP TABLE IF EXISTS "SquadAvailability";
-DROP TABLE IF EXISTS "MatchTeamStats";
-DROP TABLE IF EXISTS "MatchPlayerStats";
-DROP TABLE IF EXISTS "MatchEvents";
-DROP TABLE IF EXISTS "Matches";
-DROP TABLE IF EXISTS "Players";
-DROP TABLE IF EXISTS "Referees";
-DROP TABLE IF EXISTS "Teams";
-DROP TABLE IF EXISTS "Stadiums";
-DROP TABLE IF EXISTS "Seasons";
-DROP TABLE IF EXISTS "Leagues";
+-- ai-engine\docker\postgres\init-db.sql
 
 -- 2. CREATE TYPE ENUMs
 CREATE TYPE "MatchOutcome" AS ENUM ('H', 'D', 'A');

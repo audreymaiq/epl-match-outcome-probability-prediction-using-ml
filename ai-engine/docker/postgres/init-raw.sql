@@ -1,3 +1,5 @@
+-- ai-engine\docker\postgres\init-raw.sql
+
 -- Tạo schema raw
 CREATE SCHEMA IF NOT EXISTS raw;
 
