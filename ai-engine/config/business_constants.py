@@ -45,7 +45,7 @@ def get_last_completed_season() -> Tuple[int, int]:
     """Get last completed season dynamically with caching"""
     return _get_config().seasons.last_completed_season
 
-@lru_cache(maxsize=16)  # Cache different parameter combinations
+@lru_cache(maxsize=16)  
 def get_seasons_to_fetch(start_year: int = 2018, min_count: int = 5) -> List[Tuple[int, int]]:
     """Get seasons to fetch with parameters and caching"""
     return _get_config().seasons.get_seasons_to_fetch(start_year, min_count)
@@ -108,7 +108,6 @@ class MLOutcomeLabels(Enum):
         }
 
 # ======================== FEATURE CATEGORICAL MAPPINGS ========================
-# Enhanced mappings with proper handling of UNKNOWN values
 PLAYER_POSITION_LABELS: Dict[str, int] = {
     PlayerPosition.GK: 0,
     PlayerPosition.DEF: 1,

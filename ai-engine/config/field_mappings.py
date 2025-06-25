@@ -9,7 +9,7 @@ from .core_constants import (
     API_POSITION_MAPPING,
     API_STATUS_MAPPING,
     API_OUTCOME_MAPPING,
-    API_PLAYER_AVAILABILITY_MAPPING,  # FIXED: Import đúng tên
+    API_PLAYER_AVAILABILITY_MAPPING,
     PlayerAvailabilityStatus
 )
 from .settings import config
@@ -65,7 +65,7 @@ PERIOD_MAPPING = {
 }
 period_mapper = safe_mapping(PERIOD_MAPPING, default=None)
 
-# FIXED: Sử dụng mapping từ core_constants.py thay vì tự định nghĩa
+# Sử dụng mapping từ core_constants.py thay vì tự định nghĩa
 player_status_mapper = safe_mapping(API_PLAYER_AVAILABILITY_MAPPING, default=PlayerAvailabilityStatus.UNKNOWN)
 
 # Mapping vị trí địa lý (TeamSeasonLocationStats.location)
@@ -102,7 +102,7 @@ def load_bookmaker_mapping():
         logger.error(f"Failed to load bookmaker mapping: {e}")
         return {}
 
-# FIXED: Thêm lazy loading để tránh lỗi khi config chưa sẵn sàng
+# lazy loading để tránh lỗi khi config chưa sẵn sàng
 _bookmaker_mapping = None
 
 def get_bookmaker_mapping():

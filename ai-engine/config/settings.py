@@ -68,7 +68,7 @@ class APIFootballSettings(BaseSettings):
     
     base_url: AnyUrl = Field(
         default="https://v3.football.api-sports.io", 
-        env="API_BASE_URL"
+        env="API_FOOTBALL_BASE_URL"
     )
     api_keys: List[SecretStr] = Field(
         default_factory=list, 
@@ -91,10 +91,11 @@ class APIFootballSettings(BaseSettings):
     @field_validator("api_keys", mode="before")
     @classmethod
     def parse_api_keys(cls, value) -> List[SecretStr]:
+        print("DEBUG validator input:", value, type(value))
         """Xử lý nhiều định dạng API keys từ string hoặc list"""
         if not value:
             return []
-            
+        print(f"Test{value}")
         if isinstance(value, str):
             # Hỗ trợ cả comma và semicolon separators
             keys = []
@@ -145,6 +146,16 @@ class APIFootballSettings(BaseSettings):
         """Kiểm tra API có được cấu hình đầy đủ không"""
         return bool(self.base_url and self.api_keys)
 
+    def __init__(self, **values):
+        super().__init__(**values)
+        # print("DEBUG __init__ API_FOOTBALL_KEY:", os.getenv("API_FOOTBALL_KEY"))
+        # print("DEBUG self.api_keys:", self.api_keys)
+        if not self.api_keys:
+            raw = os.getenv("API_FOOTBALL_KEY")
+            if raw:
+                self.api_keys = [(k.strip()) for k in raw.split(",") if k.strip()]
+        # print("DEBUG __init__ API_FOOTBALL_KEY:", os.getenv("API_FOOTBALL_KEY"))
+        # print("DEBUG self.api_keys:", self.api_keys)
 
 class SeasonSettings(BaseSettings):
     """Cấu hình seasons với timezone-aware logic"""
@@ -309,11 +320,10 @@ class ConfigManager:
             try:
                 # Import tại runtime để tránh circular dependency
                 from config.env_loader import load_environment
-                load_environment()
+                load_environment(".env")
             except ImportError:
                 # Nếu không có env_loader, skip
                 pass
-
         try:
             self.db = DatabaseSettings()
             self.api = APIFootballSettings()
@@ -331,24 +341,25 @@ class ConfigManager:
             raise RuntimeError(error_msg) from e
 
     def _validate_critical_config(self):
-        """Validate các config quan trọng"""
-        errors = []
+        pass
+        # """Validate các config quan trọng"""
+        # errors = []
         
-        # Validate API keys (bắt buộc)
-        if not self.api.is_configured:
-            errors.append("API Football keys are required but not configured")
+        # # Validate API keys (bắt buộc)
+        # if not self.api.is_configured:
+        #     errors.append("API Football keys are required but not configured")
         
-        # Validate database (warning only cho dev)
-        if not self.db.is_configured:
-            try:
-                logging.warning(
-                    "Database not fully configured - ensure this is intentional for dev/test environment"
-                )
-            except:
-                print("WARNING: Database not fully configured")
+        # # Validate database (warning only cho dev)
+        # if not self.db.is_configured:
+        #     try:
+        #         logging.warning(
+        #             "Database not fully configured - ensure this is intentional for dev/test environment"
+        #         )
+        #     except:
+        #         print("WARNING: Database not fully configured")
         
-        if errors:
-            raise RuntimeError(f"Critical configuration errors: {'; '.join(errors)}")
+        # if errors:
+        #     raise RuntimeError(f"Critical configuration errors: {'; '.join(errors)}")
 
     def reload_config(self):
         """Reload configuration - useful for config updates"""

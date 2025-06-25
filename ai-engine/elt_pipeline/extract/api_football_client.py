@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional, Tuple
 # Import module endpoint
 from .api_endpoints import APIFootballEndpoints, build_url, get_rate_limit, APIFootballConfig
 
-# Config của bạn - fixed import path
 from config.settings import get_config
 
 logger = logging.getLogger(__name__)
@@ -23,13 +22,13 @@ class APIFootballClient:
     def __init__(self):
         # Get config instance
         self.config = get_config()
-        
+        print(f"Test{self.config.api.api_keys}")
         # Validate config
         if not self.config.api.is_configured:
             raise RuntimeError("API Football configuration is incomplete. Check API_FOOTBALL_KEY environment variable.")
         
         # Extract API keys properly from settings
-        self.api_keys: List[str] = [key.get_secret_value() for key in self.config.api.api_keys]
+        self.api_keys: List[str] = [key for key in self.config.api.api_keys]
         
         if not self.api_keys:
             logger.warning("No API keys provided. Requests will use empty key.")
@@ -119,8 +118,8 @@ class APIFootballClient:
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET"],  # API-Football chỉ cần GET
-            raise_on_status=False  # Don't raise immediately, let us handle
+            allowed_methods=["GET"],  
+            raise_on_status=False  
         )
         adapter = HTTPAdapter(
             max_retries=retry_strategy,
@@ -180,8 +179,8 @@ class APIFootballClient:
         endpoint_key: str,
         params: Optional[Dict[str, Any]] = None,
         method: str = "GET",
-        page: Optional[int] = None,
-        per_page: int = 100
+        page: Optional[int] = 0,
+        per_page: int = 1
     ) -> Tuple[List[Dict], Dict]:
         """
         Gọi API-Football với enhanced error handling và rate limiting.
@@ -189,13 +188,14 @@ class APIFootballClient:
         # Validate input
         if method.upper() != "GET":
             raise ValueError("API-Football only supports GET requests")
-        
+        print(1)
         # Prepare params
         params = params.copy() if params else {}
         if page is not None:
             params["page"] = page
         if per_page != 100:  # Only add if different from default
             params["per_page"] = per_page
+        print(1)
 
         # Convert endpoint_key to Enum
         try:
@@ -204,14 +204,18 @@ class APIFootballClient:
             logger.error(f"Invalid endpoint: {e}")
             raise
 
+        print(1)
         # Enforce rate limiting
-        self._enforce_rate_limit(endpoint_enum)
+        # self._enforce_rate_limit(endpoint_enum)
 
         # Get available API key
-        current_key = self._key_rotator.get_available_key()
+        # current_key = self._key_rotator.get_available_key()
+        current_key = "26acc094191539267525f16e898561a6"
+        print(1)
         
         if not current_key:
             raise RuntimeError("No API keys available")
+        print(1)
 
         # Check if all keys are in cooldown
         if self._key_rotator.all_keys_failed():
@@ -220,11 +224,11 @@ class APIFootballClient:
 
         # Build URL
         try:
-            url = build_url(endpoint_enum, params)
+            url = build_url(endpoint_enum)#m, params)
         except Exception as e:
             logger.error(f"Failed to build URL for endpoint {endpoint_enum}: {e}")
             raise
-
+        logger.debug(f"Using API key: {self._safe_log_key(current_key)} for endpoint {endpoint_enum}")
         # Prepare headers - use direct API-Football format
         headers = {
             "x-apisports-key": current_key,
@@ -235,9 +239,10 @@ class APIFootballClient:
         try:
             logger.debug(f"Making request to {endpoint_key} with params: {params}")
             response = self._session.get(url, headers=headers, timeout=self.timeout)
-            
+            print(response.content)
+            print("oke")
             # Handle response
-            return self._handle_response(response, current_key, endpoint_key)
+            # return self._handle_response(response, current_key, endpoint_key)
             
         except requests.HTTPError as e:
             self._handle_http_error(e, current_key, endpoint_key)

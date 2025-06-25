@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 from enum import Enum
 
 class APIFootballEndpoints(Enum):
-    """Danh sách các endpoint của API-Football v3 theo tài liệu chính thức"""
+    """Danh sách các endpoint của API-Football v3"""
     TIMEZONES = "/timezone"
     COUNTRIES = "/countries"
     LEAGUES = "/leagues"
@@ -30,7 +30,7 @@ class APIFootballEndpoints(Enum):
     PLAYERS_TOPREDCARDS = "/players/topredcards"
     STANDINGS = "/standings"
     VENUES = "/venues"
-    COACHES = "/coachs"  # Note: API path is /coachs but enum name should be COACHES
+    COACHES = "/coachs"  
     TRANSFERS = "/transfers"
     TROPHIES = "/trophies"
     SIDELINED = "/sidelined"

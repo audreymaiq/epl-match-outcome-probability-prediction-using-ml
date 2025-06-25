@@ -124,8 +124,28 @@ def load_environment(
     source = str(loaded_path) if loaded_path else "biến hệ thống"
     logger.info(f"Môi trường: {env_name} | Nguồn cấu hình: {source}")
 
-    # 9. Cảnh báo khi dev nhưng không có file env (giúp dev nhớ)
+    # 9. Cảnh báo nếu đang chạy development mà không có file .env
     if env_name == "development" and not loaded_path:
         logger.warning("Đang chạy development mà không có file .env - không khuyến nghị lâu dài")
 
+        print("DB_HOST:", os.getenv("DB_HOST"))
+    
+    print("DB_USER:", os.getenv("DB_USER"))
+    print("DB_PASSWORD:", os.getenv("DB_PASSWORD"))
+    print("DB_NAME:", os.getenv("DB_NAME"))
+    print("HOST_POSTGRES_PORT:", os.getenv("HOST_POSTGRES_PORT"))
+    print("API_FOOTBALL_KEY:", os.getenv("API_FOOTBALL_KEY"))
+    print("API_FOOTBALL_BASE_URL:", os.getenv("API_FOOTBALL_BASE_URL"))
+
     return loaded_path
+
+
+def test():
+    load_dotenv(dotenv_path=".env")
+    print("DB_HOST:", os.getenv("DB_HOST"))
+    print("DB_USER:", os.getenv("DB_USER"))
+    print("DB_PASSWORD:", os.getenv("DB_PASSWORD"))
+    print("DB_NAME:", os.getenv("DB_NAME"))
+    print("HOST_POSTGRES_PORT:", os.getenv("HOST_POSTGRES_PORT"))
+    print("API_FOOTBALL_KEY:", os.getenv("API_FOOTBALL_KEY"))
+    print("API_FOOTBALL_BASE_URL:", os.getenv("API_FOOTBALL_BASE_URL"))
