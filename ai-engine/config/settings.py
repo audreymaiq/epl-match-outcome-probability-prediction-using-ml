@@ -1,6 +1,6 @@
 # ai-engine\config\settings.py
 
-from pydantic import Field, AnyUrl, SecretStr, ValidationError
+from pydantic import Field, AnyUrl, ValidationError
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Dict, Tuple, Optional
@@ -25,7 +25,7 @@ class DatabaseSettings(BaseSettings):
     port: int = Field(default=5432, env="DB_PORT", gt=0, le=65535)
     dbname: str = Field(default="premier_league", env="DB_NAME", min_length=1)
     user: str = Field(default="postgres", env="DB_USER", min_length=1)
-    password: SecretStr = Field(default=SecretStr(""), env="DB_PASSWORD")
+    password: str = Field(default="", env="DB_PASSWORD")  # Changed from SecretStr to str
 
     @field_validator("host")
     @classmethod
@@ -38,7 +38,7 @@ class DatabaseSettings(BaseSettings):
     @property
     def dsn(self) -> str:
         """Tạo connection string an toàn cho PostgreSQL với URL encoding"""
-        pwd = self.password.get_secret_value()
+        pwd = self.password  # No longer need get_secret_value()
         # URL encode tất cả special characters
         user_enc = urllib.parse.quote(self.user, safe="")
         pwd_enc = urllib.parse.quote(pwd, safe="")
@@ -54,7 +54,7 @@ class DatabaseSettings(BaseSettings):
             self.host and 
             self.user and 
             self.dbname and
-            self.password.get_secret_value()
+            self.password  # No longer need get_secret_value()
         )
 
 
@@ -70,10 +70,10 @@ class APIFootballSettings(BaseSettings):
         default="https://v3.football.api-sports.io", 
         env="API_FOOTBALL_BASE_URL"
     )
-    api_keys: List[SecretStr] = Field(
+    api_keys: List[str] = Field(
         default_factory=list, 
         env="API_FOOTBALL_KEY"
-    )
+    )  # Changed from List[SecretStr] to List[str]
     
     # Rate limiting config
     requests_per_minute: int = Field(default=100, env="API_RATE_LIMIT", gt=0)
@@ -90,12 +90,12 @@ class APIFootballSettings(BaseSettings):
 
     @field_validator("api_keys", mode="before")
     @classmethod
-    def parse_api_keys(cls, value) -> List[SecretStr]:
-        print("DEBUG validator input:", value, type(value))
+    def parse_api_keys(cls, value) -> List[str]:
+        # print("DEBUG validator input:", value, type(value))
         """Xử lý nhiều định dạng API keys từ string hoặc list"""
         if not value:
             return []
-        print(f"Test{value}")
+        # print(f"Test{value}")
         if isinstance(value, str):
             # Hỗ trợ cả comma và semicolon separators
             keys = []
@@ -106,39 +106,31 @@ class APIFootballSettings(BaseSettings):
             else:
                 # Single key
                 keys = [value.strip()] if value.strip() else []
-            
-            return [SecretStr(k) for k in keys if k]
-            
+            return [k for k in keys if k]
         if isinstance(value, list):
             result = []
             for v in value:
-                if isinstance(v, SecretStr):
-                    result.append(v)
+                if isinstance(v, str):
+                    result.append(v.strip())
                 elif v and str(v).strip():
-                    result.append(SecretStr(str(v).strip()))
+                    result.append(str(v).strip())
             return result
-            
         return []
 
     def get_random_key(self) -> str:
         """Lấy ngẫu nhiên một API key với thread-safe rotation"""
         if not self.api_keys:
             raise ValueError("No API keys available - check API_FOOTBALL_KEY environment variable")
-        
-        key = random.choice(self.api_keys).get_secret_value()
-        
+        key = random.choice(self.api_keys)
         # Safe logging - chỉ log masked version
         if len(key) > 8:
             masked_key = f"{key[:4]}...{key[-4:]}"
         else:
             masked_key = f"{key[:2]}...{key[-2:]}" if len(key) > 4 else "***"
-            
-        # Only log if logging is configured
         try:
             logging.debug(f"Using API key: {masked_key}")
         except:
-            pass  # Ignore logging errors
-            
+            pass
         return key
 
     @property
@@ -148,8 +140,6 @@ class APIFootballSettings(BaseSettings):
 
     def __init__(self, **values):
         super().__init__(**values)
-        # print("DEBUG __init__ API_FOOTBALL_KEY:", os.getenv("API_FOOTBALL_KEY"))
-        # print("DEBUG self.api_keys:", self.api_keys)
         if not self.api_keys:
             raw = os.getenv("API_FOOTBALL_KEY")
             if raw:

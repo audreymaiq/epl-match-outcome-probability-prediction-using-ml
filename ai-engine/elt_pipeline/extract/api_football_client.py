@@ -3,7 +3,6 @@
 import logging
 import time
 import requests
-import threading
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log, retry_if_exception
@@ -42,39 +41,31 @@ class APIFootballClient:
         # Key rotator
         self._key_rotator = self.KeyRotator(self.api_keys)
         
-        # Lock để thread-safe xoay key
-        self._lock = threading.Lock()
-        
         # Rate limiting tracking
         self._last_request_time = {}
-        self._rate_limit_lock = threading.Lock()
 
     class KeyRotator:
-        """Quản lý xoay vòng API key thông minh"""
+        """Quản lý xoay vòng API key thông minh (không dùng threading lock)"""
         def __init__(self, keys: List[str]):
             self.keys = keys or []
             self.index = 0
             self.last_failed: Dict[str, float] = {}
             self.cooldown = 300  # 5 phút cooldown
-            self.lock = threading.Lock()
 
         def get_current_key(self) -> Optional[str]:
-            with self.lock:
-                return self.keys[self.index] if self.keys else None
+            return self.keys[self.index] if self.keys else None
 
         def next_key(self):
-            with self.lock:
-                if not self.keys:
-                    return
-                self.index = (self.index + 1) % len(self.keys)
+            if not self.keys:
+                return
+            self.index = (self.index + 1) % len(self.keys)
 
         def report_failure(self, key: str):
-            with self.lock:
-                if not key:
-                    return
-                self.last_failed[key] = time.time()
-                # Sau khi đánh dấu failure, chuyển sang key tiếp
-                self.next_key()
+            if not key:
+                return
+            self.last_failed[key] = time.time()
+            # Sau khi đánh dấu failure, chuyển sang key tiếp
+            self.next_key()
 
         def is_key_ready(self, key: str) -> bool:
             if not key:
@@ -89,25 +80,19 @@ class APIFootballClient:
             return all(not self.is_key_ready(k) for k in self.keys)
 
         def get_available_key(self) -> Optional[str]:
-            """Get next available key that's not in cooldown"""
-            with self.lock:
-                if not self.keys:
-                    return None
-                
-                # Try current key first
-                current = self.get_current_key()
-                if current and self.is_key_ready(current):
-                    return current
-                
-                # Try other keys
-                for _ in range(len(self.keys)):
-                    self.next_key()
-                    key = self.get_current_key()
-                    if key and self.is_key_ready(key):
-                        return key
-                
-                # If all keys in cooldown, return current anyway
-                return self.get_current_key()
+            """Get next available key that's not in cooldown, or return current key if all are in cooldown."""
+            if not self.keys:
+                return None
+
+            # Try each key once
+            for _ in range(len(self.keys)):
+                key = self.get_current_key()
+                if key and self.is_key_ready(key):
+                    return key
+                self.next_key()
+
+            # If all keys are in cooldown, just return the current key (even if not ready)
+            return self.get_current_key()
 
     def _create_session(self) -> requests.Session:
         """
@@ -139,21 +124,17 @@ class APIFootballClient:
         return session
 
     def _enforce_rate_limit(self, endpoint: APIFootballEndpoints):
-        """Enforce rate limiting per endpoint"""
-        with self._rate_limit_lock:
-            rate_limit = get_rate_limit(endpoint)
-            min_interval = 1.0 / rate_limit
-            
-            endpoint_key = endpoint.value
-            last_time = self._last_request_time.get(endpoint_key, 0)
-            time_since_last = time.time() - last_time
-            
-            if time_since_last < min_interval:
-                sleep_time = min_interval - time_since_last
-                logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s for {endpoint_key}")
-                time.sleep(sleep_time)
-            
-            self._last_request_time[endpoint_key] = time.time()
+        """Enforce rate limiting per endpoint (no thread lock)"""
+        rate_limit = get_rate_limit(endpoint)
+        min_interval = 1.0 / rate_limit
+        endpoint_key = endpoint.value
+        last_time = self._last_request_time.get(endpoint_key, 0)
+        time_since_last = time.time() - last_time
+        if time_since_last < min_interval:
+            sleep_time = min_interval - time_since_last
+            logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s for {endpoint_key}")
+            time.sleep(sleep_time)
+        self._last_request_time[endpoint_key] = time.time()
 
     @staticmethod
     def _should_retry(e: Exception) -> bool:
@@ -188,14 +169,12 @@ class APIFootballClient:
         # Validate input
         if method.upper() != "GET":
             raise ValueError("API-Football only supports GET requests")
-        print(1)
         # Prepare params
         params = params.copy() if params else {}
         if page is not None:
             params["page"] = page
         if per_page != 100:  # Only add if different from default
             params["per_page"] = per_page
-        print(1)
 
         # Convert endpoint_key to Enum
         try:
@@ -204,24 +183,20 @@ class APIFootballClient:
             logger.error(f"Invalid endpoint: {e}")
             raise
 
-        print(1)
         # Enforce rate limiting
-        # self._enforce_rate_limit(endpoint_enum)
+        self._enforce_rate_limit(endpoint_enum)
 
         # Get available API key
-        # current_key = self._key_rotator.get_available_key()
-        current_key = "26acc094191539267525f16e898561a6"
-        print(1)
+        current_key = self._key_rotator.get_available_key()
+        # current_key = "26acc094191539267525f16e898561a6"
         
         if not current_key:
             raise RuntimeError("No API keys available")
-        print(1)
 
         # Check if all keys are in cooldown
         if self._key_rotator.all_keys_failed():
             logger.critical("All API keys are in cooldown. Service temporarily unavailable.")
             raise RuntimeError("All API keys exhausted. Please wait before retrying.")
-
         # Build URL
         try:
             url = build_url(endpoint_enum)#m, params)
@@ -234,15 +209,14 @@ class APIFootballClient:
             "x-apisports-key": current_key,
             "Accept-Encoding": "gzip"
         }
-
         # Make request
         try:
             logger.debug(f"Making request to {endpoint_key} with params: {params}")
             response = self._session.get(url, headers=headers, timeout=self.timeout)
-            print(response.content)
-            print("oke")
+            # print(response.content)
+            # print("oke")
             # Handle response
-            # return self._handle_response(response, current_key, endpoint_key)
+            return self._handle_response(response, current_key, endpoint_key)
             
         except requests.HTTPError as e:
             self._handle_http_error(e, current_key, endpoint_key)

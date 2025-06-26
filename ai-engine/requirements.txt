@@ -6,3 +6,5 @@ python-dotenv
 beautifulsoup4
 tenacity
 tqdm
+pydantic
+pydantic_settings
