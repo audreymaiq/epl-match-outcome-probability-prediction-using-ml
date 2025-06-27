@@ -21,7 +21,6 @@ class APIFootballClient:
     def __init__(self):
         # Get config instance
         self.config = get_config()
-        print(f"Test{self.config.api.api_keys}")
         # Validate config
         if not self.config.api.is_configured:
             raise RuntimeError("API Football configuration is incomplete. Check API_FOOTBALL_KEY environment variable.")
@@ -187,8 +186,8 @@ class APIFootballClient:
         self._enforce_rate_limit(endpoint_enum)
 
         # Get available API key
-        current_key = self._key_rotator.get_available_key()
-        # current_key = "26acc094191539267525f16e898561a6"
+        # current_key = self._key_rotator.get_available_key()
+        current_key = "bcb590d87f95ea462c817e9716b42a6a"
         
         if not current_key:
             raise RuntimeError("No API keys available")
