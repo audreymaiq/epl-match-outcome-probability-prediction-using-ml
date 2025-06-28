@@ -53,7 +53,7 @@ def load_environment(
     # 3. Thiết lập biến bắt buộc mặc định
     # Chỉ kiểm biến không có default an toàn. Ví dụ API key thường không có default.
     if required_vars is None:
-        required_vars = ["API_FOOTBALL_KEY"]
+        required_vars = []
 
     # 4. Thứ tự thư mục tìm file env
     # Ưu tiên: project root, Docker/K8s secrets, user-level config, fallback module path.

@@ -9,7 +9,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_l
 from typing import Any, Dict, List, Optional, Tuple
 
 # Import module endpoint
-from .api_endpoints import APIFootballEndpoints, build_url, get_rate_limit, APIFootballConfig
+from .api_football_endpoints import APIFootballEndpoints, build_url, get_rate_limit, APIFootballConfig
 
 from config.settings import get_config
 

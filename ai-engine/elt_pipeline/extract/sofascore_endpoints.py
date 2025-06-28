@@ -1,12 +1,19 @@
 # ai-engine\elt_pipeline\extract\sofascore_endpoints.py
 
-import os
 from urllib.parse import urlencode
 from enum import Enum
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+import logging
+from functools import lru_cache
+
 
 class SofaScoreEndpoints(Enum):
-    """Danh sách các endpoint của SofaScore API"""
+    """
+    Danh sách các endpoint của SofaScore API.
+    
+    Chỉ chứa endpoint paths, không chứa configuration.
+    Configuration được quản lý bởi settings.py để tuân thủ Single Source of Truth.
+    """
     
     # Tournament endpoints
     TOURNAMENT_INFO = "/unique-tournament/{tournament_id}"
@@ -64,259 +71,469 @@ class SofaScoreEndpoints(Enum):
     SPORTS = "/sport"
 
     @classmethod
-    def from_string(cls, value: str):
+    def from_string(cls, value: str) -> 'SofaScoreEndpoints':
         """
         Chuyển đổi chuỗi thành Enum member (case-insensitive key lookup).
+        
+        Args:
+            value: Tên endpoint key
+            
+        Returns:
+            SofaScoreEndpoints: Endpoint enum member
+            
+        Raises:
+            ValueError: Nếu endpoint key không hợp lệ
         """
         if not isinstance(value, str):
             raise ValueError(f"Endpoint key phải là string, nhận: {type(value)}")
+        
         key = value.strip().upper()
         try:
             return cls[key]
         except KeyError:
-            valid = ', '.join(cls.__members__.keys())
-            raise ValueError(f"Invalid endpoint: {value!r}. Valid keys: {valid}")
+            valid_keys = ', '.join(sorted(cls.__members__.keys()))
+            raise ValueError(f"Invalid endpoint: {value!r}. Valid keys: {valid_keys}")
 
 
-class SofaScoreConfig:
+class EndpointCategory(Enum):
     """
-    Cấu hình cơ bản cho SofaScore API: BASE_URL, rate limits và headers.
+    Phân loại các endpoint theo chức năng để áp dụng rate limiting và timeout phù hợp.
     """
-    BASE_URL = "https://api.sofascore.com/api/v1"
-    
-    # Rate limits (requests per second)
-    # SofaScore không công bố rate limit chính thức, nên dùng conservative values
-    RATE_LIMITS = {
-        "DEFAULT": 2,  # Conservative default
-        "LIVE": 1,     # Live endpoints có thể nghiêm ngặt hơn
-        "SEARCH": 1,   # Search endpoints thường có rate limit thấp
-        "MEDIA": 3,    # Media endpoints có thể cho phép rate cao hơn
-    }
-    
-    # Timeout settings (seconds)
-    TIMEOUT_SETTINGS = {
-        "CONNECT_TIMEOUT": 10,
-        "READ_TIMEOUT": 30,
-        "TOTAL_TIMEOUT": 60
-    }
-    
-    # Headers mặc định cho SofaScore API
-    DEFAULT_HEADERS = {
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip, deflate",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://www.sofascore.com/",
-        "Origin": "https://www.sofascore.com"
-    }
-    
-    # API key (nếu có)
-    API_KEY = os.getenv("SOFASCORE_API_KEY", "")
-    
-    @classmethod
-    def get_headers(cls, include_api_key: bool = False) -> Dict[str, str]:
-        """Lấy headers với tùy chọn bao gồm API key"""
-        headers = cls.DEFAULT_HEADERS.copy()
-        if include_api_key and cls.API_KEY:
-            headers["Authorization"] = f"Bearer {cls.API_KEY}"
-        return headers
-    
-    @classmethod
-    def validate_config(cls):
-        """Validate configuration settings"""
-        if not cls.BASE_URL:
-            raise ValueError("BASE_URL is required")
-        if not isinstance(cls.RATE_LIMITS, dict):
-            raise ValueError("RATE_LIMITS must be a dictionary")
-        return True
+    LIVE = "live"
+    SEARCH = "search" 
+    MEDIA = "media"
+    STANDARD = "standard"
 
 
-# Mapping endpoint path → rate limit group
-RATE_LIMIT_ENDPOINT_MAPPING = {
-    # Live endpoints
-    SofaScoreEndpoints.LIVE_MATCHES.value: "LIVE",
-    SofaScoreEndpoints.LIVE_MATCH_TRACKER.value: "LIVE",
-    SofaScoreEndpoints.MATCH_MOMENTUM.value: "LIVE",
+# Mapping endpoint → category để áp dụng rate limiting
+_ENDPOINT_CATEGORY_MAPPING = {
+    # Live endpoints - cần real-time data, rate limit thấp
+    SofaScoreEndpoints.LIVE_MATCHES: EndpointCategory.LIVE,
+    SofaScoreEndpoints.LIVE_MATCH_TRACKER: EndpointCategory.LIVE,
+    SofaScoreEndpoints.MATCH_MOMENTUM: EndpointCategory.LIVE,
+    SofaScoreEndpoints.MATCH_INCIDENTS: EndpointCategory.LIVE,
     
-    # Search endpoints
-    SofaScoreEndpoints.SEARCH.value: "SEARCH",
+    # Search endpoints - thường có rate limit nghiêm ngặt
+    SofaScoreEndpoints.SEARCH: EndpointCategory.SEARCH,
     
-    # Media endpoints
-    SofaScoreEndpoints.TOURNAMENT_MEDIA.value: "MEDIA",
-    SofaScoreEndpoints.TEAM_MEDIA.value: "MEDIA",
-    SofaScoreEndpoints.PLAYER_MEDIA.value: "MEDIA",
-    SofaScoreEndpoints.MATCH_HIGHLIGHTS.value: "MEDIA",
+    # Media endpoints - có thể cho phép rate cao hơn, cần timeout lớn
+    SofaScoreEndpoints.TOURNAMENT_MEDIA: EndpointCategory.MEDIA,
+    SofaScoreEndpoints.TEAM_MEDIA: EndpointCategory.MEDIA,
+    SofaScoreEndpoints.PLAYER_MEDIA: EndpointCategory.MEDIA,
+    SofaScoreEndpoints.MATCH_HIGHLIGHTS: EndpointCategory.MEDIA,
+    SofaScoreEndpoints.MATCH_HEATMAP: EndpointCategory.MEDIA,
+    SofaScoreEndpoints.MATCH_SHOTMAP: EndpointCategory.MEDIA,
 }
 
 
-def build_url(endpoint: SofaScoreEndpoints, params: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+def _get_config():
+    """
+    Lazy import và cache config để tránh circular import.
+    
+    Returns:
+        ConfigManager: Configuration instance
+        
+    Raises:
+        ImportError: Nếu không thể import config
+    """
+    try:
+        from ...config.settings import get_config
+        return get_config()
+    except ImportError as e:
+        logging.error(f"Cannot import config: {e}")
+        raise ImportError("Cannot access configuration. Ensure settings module is available.") from e
+
+
+@lru_cache(maxsize=1)
+def _get_base_url() -> str:
+    """
+    Lấy base URL từ configuration với caching.
+    
+    Returns:
+        str: Base URL from configuration
+        
+    Note:
+        Tuân thủ Single Source of Truth - chỉ lấy từ settings.py
+    """
+    try:
+        config = _get_config()
+        return str(config.sofascore.base_url).rstrip('/')
+    except Exception as e:
+        logging.error(f"Error getting base URL from config: {e}")
+        raise RuntimeError("Cannot retrieve base URL from configuration") from e
+
+
+def get_endpoint_category(endpoint: SofaScoreEndpoints) -> EndpointCategory:
+    """
+    Xác định category của endpoint để áp dụng rate limiting phù hợp.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        EndpointCategory: Category của endpoint
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    return _ENDPOINT_CATEGORY_MAPPING.get(endpoint, EndpointCategory.STANDARD)
+
+
+def get_rate_limit_per_second(endpoint: SofaScoreEndpoints) -> int:
+    """
+    Lấy rate limit (requests/second) cho endpoint từ configuration.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        int: Rate limit in requests per second
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    try:
+        config = _get_config()
+        
+        # Convert requests_per_minute to requests_per_second
+        requests_per_minute = config.sofascore.requests_per_minute
+        base_rate_per_second = max(1, requests_per_minute // 60)
+        
+        # Áp dụng modifier theo category
+        category = get_endpoint_category(endpoint)
+        
+        if category == EndpointCategory.LIVE:
+            # Live endpoints: giảm 50% để tránh overload
+            return max(1, base_rate_per_second // 2)
+        elif category == EndpointCategory.SEARCH:
+            # Search endpoints: giảm 75% vì thường có rate limit nghiêm ngặt
+            return max(1, base_rate_per_second // 4)
+        elif category == EndpointCategory.MEDIA:
+            # Media endpoints: có thể tăng 50% vì ít sensitive hơn
+            return base_rate_per_second + max(1, base_rate_per_second // 2)
+        else:
+            # Standard endpoints
+            return base_rate_per_second
+            
+    except Exception as e:
+        logging.warning(f"Error getting rate limit from config: {e}. Using default.")
+        return 1  # Safe default
+
+
+def get_timeout_settings(endpoint: SofaScoreEndpoints) -> Tuple[int, int]:
+    """
+    Lấy timeout settings (connect_timeout, read_timeout) cho endpoint từ configuration.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        Tuple[int, int]: (connect_timeout, read_timeout) in seconds
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    try:
+        config = _get_config()
+        connect_timeout = config.scraping.connect_timeout
+        read_timeout = config.scraping.read_timeout
+        
+        # Điều chỉnh timeout theo category
+        category = get_endpoint_category(endpoint)
+        
+        if category == EndpointCategory.LIVE:
+            # Live endpoints: timeout ngắn hơn để real-time
+            return (connect_timeout // 2, read_timeout // 2)
+        elif category == EndpointCategory.MEDIA:
+            # Media endpoints: timeout dài hơn cho việc download
+            return (connect_timeout, read_timeout * 2)
+        else:
+            # Standard và Search endpoints
+            return (connect_timeout, read_timeout)
+            
+    except Exception as e:
+        logging.warning(f"Error getting timeout from config: {e}. Using defaults.")
+        return (10, 30)  # Safe defaults
+
+
+def get_headers(endpoint: SofaScoreEndpoints, referer: Optional[str] = None) -> Dict[str, str]:
+    """
+    Lấy headers cho request từ configuration với randomization.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        referer: Optional referer URL
+        
+    Returns:
+        Dict[str, str]: Request headers
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    try:
+        config = _get_config()
+        return config.sofascore.get_headers(referer=referer)
+    except Exception as e:
+        logging.warning(f"Error getting headers from config: {e}. Using minimal headers.")
+        # Fallback headers - minimal để không fail request
+        return {
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+
+
+def build_url(
+    endpoint: SofaScoreEndpoints, 
+    params: Optional[Dict[str, Any]] = None, 
+    **kwargs
+) -> str:
     """
     Xây dựng URL đầy đủ cho yêu cầu API SofaScore.
     
     Args:
-        endpoint: member của SofaScoreEndpoints
-        params: dict các tham số query string
-        **kwargs: các tham số để format vào URL path (tournament_id, match_id, etc.)
+        endpoint: SofaScore endpoint enum member
+        params: Dict các tham số query string
+        **kwargs: Các tham số để format vào URL path (tournament_id, match_id, etc.)
     
     Returns:
         str: URL đầy đủ
     
     Raises:
-        TypeError: nếu endpoint không phải SofaScoreEndpoints
-        ValueError: nếu thiếu tham số bắt buộc để format URL
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+        ValueError: Nếu thiếu tham số bắt buộc để format URL
+        RuntimeError: Nếu không thể lấy base URL từ config
     """
     if not isinstance(endpoint, SofaScoreEndpoints):
         raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
     
-    base = SofaScoreConfig.BASE_URL.rstrip('/')
+    # Lấy base URL từ configuration (Single Source of Truth)
+    base_url = _get_base_url()
     
     try:
         # Format URL path với các tham số từ kwargs
         path = endpoint.value.format(**kwargs)
     except KeyError as e:
         missing_param = str(e).strip("'")
-        raise ValueError(f"Thiếu tham số bắt buộc '{missing_param}' để format endpoint {endpoint.name}")
+        raise ValueError(
+            f"Thiếu tham số bắt buộc '{missing_param}' để format endpoint {endpoint.name}"
+        ) from e
     
-    url = f"{base}{path}"
+    full_url = f"{base_url}{path}"
     
     # Thêm query parameters nếu có
     if params:
-        # Filter out None values và empty strings
-        clean_params = {k: v for k, v in params.items() if v is not None and v != ""}
+        # Filter out None values và empty strings - Clean Code principle
+        clean_params = {
+            k: v for k, v in params.items() 
+            if v is not None and v != ""
+        }
         if clean_params:
-            qs = urlencode(clean_params, doseq=True)
-            url = f"{url}?{qs}"
+            query_string = urlencode(clean_params, doseq=True)
+            full_url = f"{full_url}?{query_string}"
     
-    return url
-
-
-def get_rate_limit(endpoint: SofaScoreEndpoints) -> int:
-    """
-    Lấy giới hạn requests/giây cho endpoint.
-    Nếu không có quy định riêng, trả về DEFAULT.
-    """
-    if not isinstance(endpoint, SofaScoreEndpoints):
-        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
-    
-    # Tìm rate limit group cho endpoint
-    endpoint_path = endpoint.value
-    
-    # Kiểm tra exact match trước
-    if endpoint_path in RATE_LIMIT_ENDPOINT_MAPPING:
-        key = RATE_LIMIT_ENDPOINT_MAPPING[endpoint_path]
-    else:
-        # Kiểm tra partial match cho các endpoint có template
-        key = "DEFAULT"
-        for mapped_path, rate_group in RATE_LIMIT_ENDPOINT_MAPPING.items():
-            if _path_matches_template(endpoint_path, mapped_path):
-                key = rate_group
-                break
-    
-    limit = SofaScoreConfig.RATE_LIMITS.get(key, SofaScoreConfig.RATE_LIMITS["DEFAULT"])
-    
-    try:
-        val = int(limit)
-        return max(val, 1)  # Minimum 1 request per second
-    except (ValueError, TypeError):
-        return SofaScoreConfig.RATE_LIMITS["DEFAULT"]
+    return full_url
 
 
 def is_live_endpoint(endpoint: SofaScoreEndpoints) -> bool:
     """
     Kiểm tra xem endpoint có phải là live endpoint không.
-    Live endpoints thường có rate limit thấp hơn và cần real-time data.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        bool: True nếu là live endpoint
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
     """
-    live_endpoints = {
-        SofaScoreEndpoints.LIVE_MATCHES,
-        SofaScoreEndpoints.LIVE_MATCH_TRACKER,
-        SofaScoreEndpoints.MATCH_MOMENTUM,
-        SofaScoreEndpoints.MATCH_INCIDENTS,
-    }
-    return endpoint in live_endpoints
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    return get_endpoint_category(endpoint) == EndpointCategory.LIVE
 
 
 def is_media_endpoint(endpoint: SofaScoreEndpoints) -> bool:
     """
     Kiểm tra xem endpoint có phải là media endpoint không.
-    Media endpoints thường trả về URLs hoặc binary data.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        bool: True nếu là media endpoint
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
     """
-    media_endpoints = {
-        SofaScoreEndpoints.TOURNAMENT_MEDIA,
-        SofaScoreEndpoints.TEAM_MEDIA,
-        SofaScoreEndpoints.PLAYER_MEDIA,
-        SofaScoreEndpoints.MATCH_HIGHLIGHTS,
-        SofaScoreEndpoints.MATCH_HEATMAP,
-        SofaScoreEndpoints.MATCH_SHOTMAP,
-    }
-    return endpoint in media_endpoints
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    return get_endpoint_category(endpoint) == EndpointCategory.MEDIA
 
 
 def requires_auth(endpoint: SofaScoreEndpoints) -> bool:
     """
     Kiểm tra xem endpoint có cần authentication không.
-    Một số endpoint của SofaScore có thể cần API key hoặc authentication.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        bool: True nếu cần authentication
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+        
+    Note:
+        Hiện tại SofaScore public API không yêu cầu auth cho hầu hết endpoints.
+        Hàm này để chuẩn bị cho tương lai nếu có premium endpoints.
     """
-    # Hiện tại SofaScore public API không yêu cầu auth cho hầu hết endpoints
-    # Tuy nhiên có thể có một số endpoint premium cần auth
-    premium_endpoints = {
-        # Thêm các endpoint cần auth ở đây khi có thông tin
-    }
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    # Hiện tại không có endpoint nào cần auth
+    # Có thể extend trong tương lai
+    premium_endpoints = set()  # type: set[SofaScoreEndpoints]
+    
     return endpoint in premium_endpoints
 
 
-def get_timeout(endpoint: SofaScoreEndpoints) -> tuple:
-    """
-    Lấy timeout settings cho endpoint (connect_timeout, read_timeout).
-    """
-    config = SofaScoreConfig.TIMEOUT_SETTINGS
-    
-    # Live endpoints có thể cần timeout ngắn hơn
-    if is_live_endpoint(endpoint):
-        return (config["CONNECT_TIMEOUT"] // 2, config["READ_TIMEOUT"] // 2)
-    
-    # Media endpoints có thể cần timeout dài hơn
-    if is_media_endpoint(endpoint):
-        return (config["CONNECT_TIMEOUT"], config["READ_TIMEOUT"] * 2)
-    
-    return (config["CONNECT_TIMEOUT"], config["READ_TIMEOUT"])
-
-
-def _path_matches_template(endpoint_path: str, template_path: str) -> bool:
-    """
-    Kiểm tra xem endpoint path có match với template path không.
-    Helper function cho rate limit mapping.
-    """
-    # Simple template matching - có thể cải thiện thêm nếu cần
-    endpoint_parts = endpoint_path.split('/')
-    template_parts = template_path.split('/')
-    
-    if len(endpoint_parts) != len(template_parts):
-        return False
-    
-    for ep, tp in zip(endpoint_parts, template_parts):
-        if tp.startswith('{') and tp.endswith('}'):
-            continue  # Template parameter, skip
-        if ep != tp:
-            return False
-    
-    return True
-
-
 # Convenience functions cho các use cases phổ biến
-def build_tournament_url(tournament_id: int, params: Optional[Dict] = None) -> str:
-    """Convenience function để build URL cho tournament info"""
+def build_tournament_url(tournament_id: int, params: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Convenience function để build URL cho tournament info.
+    
+    Args:
+        tournament_id: ID của tournament
+        params: Optional query parameters
+        
+    Returns:
+        str: Tournament URL
+        
+    Raises:
+        ValueError: Nếu tournament_id không hợp lệ
+    """
+    if not isinstance(tournament_id, int) or tournament_id <= 0:
+        raise ValueError(f"tournament_id phải là integer dương, nhận: {tournament_id}")
+    
     return build_url(SofaScoreEndpoints.TOURNAMENT_INFO, params, tournament_id=tournament_id)
 
 
-def build_match_url(match_id: int, params: Optional[Dict] = None) -> str:
-    """Convenience function để build URL cho match detail"""
+def build_match_url(match_id: int, params: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Convenience function để build URL cho match detail.
+    
+    Args:
+        match_id: ID của match
+        params: Optional query parameters
+        
+    Returns:
+        str: Match URL
+        
+    Raises:
+        ValueError: Nếu match_id không hợp lệ
+    """
+    if not isinstance(match_id, int) or match_id <= 0:
+        raise ValueError(f"match_id phải là integer dương, nhận: {match_id}")
+    
     return build_url(SofaScoreEndpoints.MATCH_DETAIL, params, match_id=match_id)
 
 
-def build_team_url(team_id: int, params: Optional[Dict] = None) -> str:
-    """Convenience function để build URL cho team info"""
+def build_team_url(team_id: int, params: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Convenience function để build URL cho team info.
+    
+    Args:
+        team_id: ID của team
+        params: Optional query parameters
+        
+    Returns:
+        str: Team URL
+        
+    Raises:
+        ValueError: Nếu team_id không hợp lệ
+    """
+    if not isinstance(team_id, int) or team_id <= 0:
+        raise ValueError(f"team_id phải là integer dương, nhận: {team_id}")
+    
     return build_url(SofaScoreEndpoints.TEAM_INFO, params, team_id=team_id)
 
 
-def build_player_url(player_id: int, params: Optional[Dict] = None) -> str:
-    """Convenience function để build URL cho player info"""
+def build_player_url(player_id: int, params: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Convenience function để build URL cho player info.
+    
+    Args:
+        player_id: ID của player
+        params: Optional query parameters
+        
+    Returns:
+        str: Player URL
+        
+    Raises:
+        ValueError: Nếu player_id không hợp lệ
+    """
+    if not isinstance(player_id, int) or player_id <= 0:
+        raise ValueError(f"player_id phải là integer dương, nhận: {player_id}")
+    
     return build_url(SofaScoreEndpoints.PLAYER_INFO, params, player_id=player_id)
+
+
+def validate_endpoint_params(endpoint: SofaScoreEndpoints, **kwargs) -> Dict[str, Any]:
+    """
+    Validate các tham số required cho endpoint.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        **kwargs: Parameters để validate
+        
+    Returns:
+        Dict[str, Any]: Validated parameters
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+        ValueError: Nếu thiếu hoặc có tham số không hợp lệ
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    # Extract required parameters từ endpoint path
+    import re
+    required_params = re.findall(r'\{(\w+)\}', endpoint.value)
+    
+    validated_params = {}
+    
+    for param in required_params:
+        if param not in kwargs:
+            raise ValueError(f"Thiếu tham số bắt buộc '{param}' cho endpoint {endpoint.name}")
+        
+        value = kwargs[param]
+        
+        # Validate common parameter types
+        if param.endswith('_id'):
+            if not isinstance(value, int) or value <= 0:
+                raise ValueError(f"Parameter '{param}' phải là integer dương, nhận: {value}")
+        elif param in ('page', 'round'):
+            if not isinstance(value, int) or value < 0:
+                raise ValueError(f"Parameter '{param}' phải là integer không âm, nhận: {value}")
+        elif param == 'query':
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Parameter '{param}' phải là string không rỗng, nhận: {value}")
+            value = value.strip()
+        
+        validated_params[param] = value
+    
+    return validated_params

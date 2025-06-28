@@ -139,7 +139,7 @@ class APIFootballSettings(BaseSettings):
         if not self.api_keys:
             raw = os.getenv("API_FOOTBALL_KEY")
             if raw:
-                self.api_keys = [(k.strip()) for k in raw.split(",") if k.strip()]
+                self.api_keys = [k.strip() for k in raw.split(",") if k.strip()]
 
 class SofascoreSettings(BaseSettings):
     """Cấu hình Sofascore API không chính thức - Enhanced for scraping"""
@@ -221,9 +221,9 @@ class SofascoreSettings(BaseSettings):
     @classmethod
     def parse_string_list(cls, value, field_info) -> List[str]:
         """Parse user agents/languages từ string hoặc list"""
-        field_name = field_info.field_name
+        field_name = getattr(field_info, 'field_name', 'unknown')
         
-        # Get default values - FIX: Access default_factory properly
+        # Get default values
         if field_name == "user_agents":
             default_value = [
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -291,10 +291,10 @@ class SofascoreSettings(BaseSettings):
             
         return headers
 
-    # Trong SofascoreSettings, cải thiện get_season_id_mapping method:
     def get_season_id_mapping(self) -> Dict[str, int]:
         """Get season name to SofaScore season ID mapping with validation"""
         try:
+            # Import here to avoid circular import
             from .core_constants import SofascoreConstants
             season_ids = SofascoreConstants.SEASON_IDS.copy()
             
@@ -310,30 +310,27 @@ class SofascoreSettings(BaseSettings):
             
         except ImportError as e:
             logging.error(f"Cannot import SofascoreConstants: {e}")
-            return {}
+            # Fallback với default season IDs
+            return {
+                "2017/18": 13380,
+                "2018/19": 17359,
+                "2019/20": 23776,
+                "2020/21": 29415,
+                "2021/22": 37036,
+                "2022/23": 41886,
+                "2023/24": 52186,
+                "2024/25": 61627
+            }
         except Exception as e:
             logging.error(f"Error getting season ID mapping: {e}")
             return {}
 
-    # Helper method để get season ID from year:
-    def get_season_id_from_year(self, year: int) -> Optional[int]:
-        """Get SofaScore season ID from year (e.g., 2023 -> season ID for 2023/24)"""
-        season_mapping = self.supported_seasons  # Dict[int, str] - e.g., {2023: "2023/24"}
-        sofascore_mapping = self.get_season_id_mapping()  # Dict[str, int] - e.g., {"2023/24": 52186}
-        
-        season_name = season_mapping.get(year)
-        if not season_name:
-            return None
-            
-        return sofascore_mapping.get(season_name)
-
-    # Enhanced target seasons method with proper typing:
-    def get_target_seasons_with_ids(self) -> List[Tuple[int, str, int]]:
+    def get_target_seasons_with_ids(self, seasons: 'SeasonSettings') -> List[Tuple[int, str, int]]:
         """
         Get target seasons with their SofaScore IDs
         Returns: List of (year, season_name, sofascore_id)
         """
-        target_seasons = self.seasons.get_target_seasons()  # List[Tuple[int, str]]
+        target_seasons = seasons.get_target_seasons()  # List[Tuple[int, str]]
         sofascore_ids = self.get_season_id_mapping()  # Dict[str, int]
         
         result = []
@@ -346,14 +343,12 @@ class SofascoreSettings(BaseSettings):
                 
         return result
 
-    def validate_season_consistency(self) -> bool:
+    def validate_season_consistency(self, seasons: 'SeasonSettings') -> bool:
         """Validate rằng supported_seasons khớp với SofaScore season IDs"""
         try:
-            from .core_constants import SofascoreConstants
-            
-            sofascore_seasons = set(SofascoreConstants.SEASON_IDS.keys())
-            config_seasons = set(self.get_season_id_mapping().values())  # Get season names
-            supported_seasons = set(self.supported_seasons.values())
+            sofascore_mapping = self.get_season_id_mapping()  # Dict[str, int]
+            sofascore_seasons = set(sofascore_mapping.keys())  # Set of season names
+            supported_seasons = set(seasons.supported_seasons.values())  # Set of season names
             
             # Check if all config seasons have corresponding SofaScore IDs
             missing_in_sofascore = supported_seasons - sofascore_seasons
@@ -374,7 +369,7 @@ class SofascoreSettings(BaseSettings):
 
     @property 
     def is_configured(self) -> bool:
-        """Kiểm tra Sofascore có được cấu hình đầy đủ không - Enhanced with season validation"""
+        """Kiểm tra Sofascore có được cấu hình đầy đủ không"""
         basic_config = bool(
             self.base_url and 
             self.premier_league_id and 
@@ -382,18 +377,7 @@ class SofascoreSettings(BaseSettings):
             self.requests_per_minute > 0
         )
         
-        if not basic_config:
-            return False
-            
-        # Optional: Validate season consistency
-        try:
-            season_valid = self.validate_season_consistency()
-            if not season_valid:
-                logging.warning("Season configuration inconsistency detected")
-            return True  # Don't fail on season inconsistency, just warn
-        except:
-            return True  # Don't fail if validation has issues
-
+        return basic_config
 
 class ScrapingSettings(BaseSettings):
     """Cấu hình chung cho web scraping - Enhanced"""
@@ -490,6 +474,23 @@ class ScrapingSettings(BaseSettings):
         
         return (1.0, 3.0)  # Default
 
+    @field_validator("browser_type")
+    @classmethod
+    def validate_browser_type(cls, v: str) -> str:
+        """Validate browser type"""
+        allowed_browsers = ["chrome", "firefox", "safari"]
+        if v.lower() not in allowed_browsers:
+            raise ValueError(f"Browser type must be one of: {allowed_browsers}")
+        return v.lower()
+    
+    @field_validator("cache_dir")
+    @classmethod
+    def validate_cache_dir(cls, v: str) -> str:
+        """Ensure cache directory path is valid"""
+        if not v or v.isspace():
+            raise ValueError("Cache directory cannot be empty")
+        return v.strip()    
+    
     def get_random_delay(self) -> float:
         """Tạo delay ngẫu nhiên trong khoảng cho phép"""
         min_delay, max_delay = self.random_delay_range
@@ -590,7 +591,7 @@ class SeasonSettings(BaseSettings):
             now = datetime.utcnow()
             return now.year if now.month >= 8 else now.year - 1
 
-    def get_target_seasons(self) -> List[Tuple[int, str]]:  # FIX: Change return type annotation
+    def get_target_seasons(self) -> List[Tuple[int, str]]:
         """
         Lấy danh sách seasons target để scrape data (7 seasons gần nhất đã hoàn thành)
         """
@@ -610,7 +611,19 @@ class SeasonSettings(BaseSettings):
             logging.error(f"Error getting target seasons: {e}. Using fallback.", exc_info=True)
             # Fallback: Lấy các mùa giải mặc định và cắt theo số lượng
             default_seasons = sorted(self._get_default_seasons().items(), key=lambda x: x[0], reverse=True)
-            return default_seasons[1:self.seasons_to_fetch + 1] # Bỏ mùa mới nhất (2024), lấy 7 mùa tiếp theo
+            # Đảm bảo không bị IndexError
+            start_idx = 1 if len(default_seasons) > 1 else 0
+            end_idx = min(len(default_seasons), start_idx + self.seasons_to_fetch)
+            return default_seasons[start_idx:end_idx]
+
+    def get_season_id_from_year(self, year: int, sofascore_settings: 'SofascoreSettings') -> Optional[int]:
+        """Get SofaScore season ID from year (e.g., 2023 -> season ID for 2023/24)"""
+        season_name = self.supported_seasons.get(year)
+        if not season_name:
+            return None
+            
+        sofascore_mapping = sofascore_settings.get_season_id_mapping()
+        return sofascore_mapping.get(season_name)
 
 
 # ConfigManager đã được cập nhật để bỏ APIFootball
@@ -666,6 +679,18 @@ class ConfigManager:
         self._load_config()
         log.info("Configuration reloaded.")
 
+    def get_season_id_from_year(self, year: int) -> Optional[int]:
+        """Wrapper method để gọi SofascoreSettings với SeasonSettings"""
+        return self.sofascore.get_season_id_from_year(year, self.seasons)
+    
+    def get_target_seasons_with_ids(self) -> List[Tuple[int, str, int]]:
+        """Wrapper method để lấy target seasons với IDs"""
+        return self.sofascore.get_target_seasons_with_ids(self.seasons)
+    
+    def validate_season_consistency(self) -> bool:
+        """Wrapper method để validate season consistency"""
+        return self.sofascore.validate_season_consistency(self.seasons)
+    
     @property
     def is_production(self) -> bool:
         return os.getenv("ENVIRONMENT", "dev").lower() in ("production", "prod")
