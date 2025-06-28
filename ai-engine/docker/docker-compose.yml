@@ -9,9 +9,9 @@ services:
     restart: unless-stopped
     
     environment:
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-plpredict2025} 
-      POSTGRES_USER: ${DB_USER:-PLpredict} 
-      POSTGRES_DB: ${DB_NAME:-premier_league} 
+      POSTGRES_PASSWORD: ${PASSWORD:-plpredict2025} 
+      POSTGRES_USER: ${USER:-PLpredict} 
+      POSTGRES_DB: ${DBNAME:-premier_league} 
     
     ports:
       - "${HOST_POSTGRES_PORT:-5432}:5432" 

@@ -17,17 +17,17 @@ ENV_FILE_PATH = (Path(__file__).parent.parent / ".env").resolve()
 class DatabaseSettings(BaseSettings):
     """Cấu hình database với validation an toàn"""
     model_config = SettingsConfigDict(
-        env_file=ENV_FILE_PATH,
+        env_file=str(ENV_FILE_PATH),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
     )
     
-    host: str = Field(default="localhost", env="DB_HOST")
-    port: int = Field(default=5432, env="DB_PORT", gt=0, le=65535)
-    dbname: str = Field(default="premier_league", env="DB_NAME", min_length=1)
-    user: str = Field(default="postgres", env="DB_USER", min_length=1)
-    password: str = Field(default="", env="DB_PASSWORD")
+    host: str = Field(default="localhost")
+    port: int = Field(default=5432, gt=0, le=65535)
+    dbname: str = Field(default="premier_league", min_length=1)
+    user: str = Field(default="postgres", min_length=1)
+    password: str = Field(default="")
 
     @field_validator("host")
     @classmethod
@@ -56,7 +56,7 @@ class DatabaseSettings(BaseSettings):
 class APIFootballSettings(BaseSettings):
     """Cấu hình API Football với multiple keys và rotation (legacy support)"""
     model_config = SettingsConfigDict(
-        env_file=ENV_FILE_PATH,
+        env_file=str(ENV_FILE_PATH),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -144,7 +144,7 @@ class APIFootballSettings(BaseSettings):
 class SofascoreSettings(BaseSettings):
     """Cấu hình Sofascore API không chính thức - Enhanced for scraping"""
     model_config = SettingsConfigDict(
-        env_file=ENV_FILE_PATH,
+        env_file=str(ENV_FILE_PATH),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -382,7 +382,7 @@ class SofascoreSettings(BaseSettings):
 class ScrapingSettings(BaseSettings):
     """Cấu hình chung cho web scraping - Enhanced"""
     model_config = SettingsConfigDict(
-        env_file=ENV_FILE_PATH,
+        env_file=str(ENV_FILE_PATH),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -512,11 +512,10 @@ class ScrapingSettings(BaseSettings):
             self.random_delay_range[0] < self.random_delay_range[1]
         )
 
-
 class SeasonSettings(BaseSettings):
     """Cấu hình seasons với timezone-aware logic"""
     model_config = SettingsConfigDict(
-        env_file=ENV_FILE_PATH,
+        env_file=str(ENV_FILE_PATH),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -625,7 +624,6 @@ class SeasonSettings(BaseSettings):
         sofascore_mapping = sofascore_settings.get_season_id_mapping()
         return sofascore_mapping.get(season_name)
 
-
 # ConfigManager đã được cập nhật để bỏ APIFootball
 _config_instance: Optional['ConfigManager'] = None
 
@@ -680,8 +678,8 @@ class ConfigManager:
         log.info("Configuration reloaded.")
 
     def get_season_id_from_year(self, year: int) -> Optional[int]:
-        """Wrapper method để gọi SofascoreSettings với SeasonSettings"""
-        return self.sofascore.get_season_id_from_year(year, self.seasons)
+        """Wrapper method để gọi SeasonSettings với SofascoreSettings"""
+        return self.seasons.get_season_id_from_year(year, self.sofascore)
     
     def get_target_seasons_with_ids(self) -> List[Tuple[int, str, int]]:
         """Wrapper method để lấy target seasons với IDs"""

@@ -8,24 +8,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# 2. NẠP BIẾN MÔI TRƯỜNG
-from config.env_loader import load_environment
-# Chỉ định đường dẫn tới file .env ở thư mục gốc của dự án
-env_file_path = ROOT / '.env'
-if env_file_path.exists():
-    print(f"Loading environment from: {env_file_path}")
-    load_environment(env_path=str(env_file_path))
-else:
-    print(f"Warning: .env file not found at {env_file_path}")
-
-# 3. Thiết lập logging
+# 2. Thiết lập logging
 from config.settings import get_config
 from utils.db_connector import DatabaseConnector
 import logging
 
 # Kiểm tra ngay lập tức xem biến đã được nạp chưa
-print(f"[PRE-CHECK] DB_USER in os.environ: {os.getenv('DB_USER')}")
-print(f"[PRE-CHECK] DB_PASSWORD in os.environ: {'*' * len(os.getenv('DB_PASSWORD', '')) if os.getenv('DB_PASSWORD') else 'EMPTY'}")
+print(f"[PRE-CHECK] DB_USER in os.environ: {os.getenv('USER')}")
+print(f"[PRE-CHECK] DB_PASSWORD in os.environ: {'*' * len(os.getenv('PASSWORD', '')) if os.getenv('PASSWORD') else 'EMPTY'}")
 
 def main():
     logging.basicConfig(
