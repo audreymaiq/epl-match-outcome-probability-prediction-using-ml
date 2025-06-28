@@ -12,15 +12,7 @@ import urllib.parse
 import random
 from datetime import datetime
 
-ENV_FILE_PATH = Path(__file__).parent.parent / ".env"
-
-print("="*50)
-print(f"DEBUG: Searching for .env file at: {ENV_FILE_PATH}")
-if ENV_FILE_PATH.exists():
-    print("DEBUG: .env file FOUND!")
-else:
-    print("DEBUG: .env file NOT FOUND at this path!")
-print("="*50)
+ENV_FILE_PATH = (Path(__file__).parent.parent / ".env").resolve()
 
 class DatabaseSettings(BaseSettings):
     """Cấu hình database với validation an toàn"""
@@ -28,14 +20,14 @@ class DatabaseSettings(BaseSettings):
         env_file=ENV_FILE_PATH,
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"  # Bỏ qua các env vars không liên quan
+        extra="ignore"
     )
     
     host: str = Field(default="localhost", env="DB_HOST")
     port: int = Field(default=5432, env="DB_PORT", gt=0, le=65535)
     dbname: str = Field(default="premier_league", env="DB_NAME", min_length=1)
     user: str = Field(default="postgres", env="DB_USER", min_length=1)
-    password: str = Field(default="", env="DB_PASSWORD")  # Changed from SecretStr to str
+    password: str = Field(default="", env="DB_PASSWORD")
 
     @field_validator("host")
     @classmethod
@@ -48,8 +40,7 @@ class DatabaseSettings(BaseSettings):
     @property
     def dsn(self) -> str:
         """Tạo connection string an toàn cho PostgreSQL với URL encoding"""
-        pwd = self.password  # No longer need get_secret_value()
-        # URL encode tất cả special characters
+        pwd = self.password
         user_enc = urllib.parse.quote(self.user, safe="")
         pwd_enc = urllib.parse.quote(pwd, safe="")
         host_enc = urllib.parse.quote(self.host, safe="")
@@ -60,18 +51,7 @@ class DatabaseSettings(BaseSettings):
     @property
     def is_configured(self) -> bool:
         """Kiểm tra database có được cấu hình đầy đủ không"""
-        return bool(
-            self.host and 
-            self.user and 
-            self.dbname and
-            self.password  # No longer need get_secret_value()
-        )
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        print(f"[DEBUG] Loaded DB_USER: {self.user}")
-        print(f"[DEBUG] Loaded DB_PASSWORD: {self.password}")
-
+        return bool(self.host and self.user and self.dbname and self.password)
 
 class APIFootballSettings(BaseSettings):
     """Cấu hình API Football với multiple keys và rotation (legacy support)"""
@@ -160,12 +140,9 @@ class APIFootballSettings(BaseSettings):
             raw = os.getenv("API_FOOTBALL_KEY")
             if raw:
                 self.api_keys = [(k.strip()) for k in raw.split(",") if k.strip()]
-        # print("DEBUG __init__ API_FOOTBALL_KEY:", os.getenv("API_FOOTBALL_KEY"))
-        # print("DEBUG self.api_keys:", self.api_keys)
-
 
 class SofascoreSettings(BaseSettings):
-    """Cấu hình Sofascore API không chính thức"""
+    """Cấu hình Sofascore API không chính thức - Enhanced for scraping"""
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_PATH,
         env_file_encoding="utf-8",
@@ -173,90 +150,253 @@ class SofascoreSettings(BaseSettings):
         extra="ignore"
     )
     
+    # Base URLs cho các endpoints khác nhau
     base_url: AnyUrl = Field(
         default="https://api.sofascore.com/api/v1", 
         env="SOFASCORE_BASE_URL"
+    )
+    
+    # Web URLs cho scraping fallback
+    web_base_url: AnyUrl = Field(
+        default="https://www.sofascore.com",
+        env="SOFASCORE_WEB_URL"
     )
     
     # Premier League tournament ID trên Sofascore
     premier_league_id: int = Field(default=17, env="SOFASCORE_EPL_ID")
     
     # Rate limiting để tránh bị block
-    requests_per_minute: int = Field(default=60, env="SOFASCORE_RATE_LIMIT", gt=0)
-    delay_between_requests: float = Field(default=1.0, env="SOFASCORE_DELAY", ge=0.1)
+    requests_per_minute: int = Field(default=30, env="SOFASCORE_RATE_LIMIT", gt=0)  # Giảm xuống để an toàn
+    delay_between_requests: float = Field(default=2.0, env="SOFASCORE_DELAY", ge=0.5)  # Tăng delay
     
-    # Retry configuration
-    max_retries: int = Field(default=3, env="SOFASCORE_MAX_RETRIES", ge=1)
-    retry_delay: float = Field(default=2.0, env="SOFASCORE_RETRY_DELAY", ge=0.5)
+    # Retry configuration - Enhanced
+    max_retries: int = Field(default=5, env="SOFASCORE_MAX_RETRIES", ge=1)  # Tăng retries
+    retry_delay: float = Field(default=3.0, env="SOFASCORE_RETRY_DELAY", ge=1.0)  # Tăng delay
+    exponential_backoff: bool = Field(default=True, env="SOFASCORE_EXPONENTIAL_BACKOFF")
     
-    # Headers rotation để tránh detection
+    # Circuit breaker để tránh spam requests
+    circuit_breaker_threshold: int = Field(default=5, env="SOFASCORE_CIRCUIT_THRESHOLD", ge=3)
+    circuit_breaker_timeout: int = Field(default=300, env="SOFASCORE_CIRCUIT_TIMEOUT", ge=60)  # 5 minutes
+    
+    # Headers rotation để tránh detection - Enhanced
     user_agents: List[str] = Field(
         default_factory=lambda: [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0"
         ],
-        env="SOFASCORE_USER_AGENTS"
+        env="SOFASCORE_USER_AGENTS",
+        description="Danh sách User-Agent để xoay vòng, phân tách bằng dấu ; hoặc newline."
     )
-
-    @field_validator("base_url")
+    
+    # Accept languages for better disguise
+    accept_languages: List[str] = Field(
+        default_factory=lambda: [
+            "en-US,en;q=0.9",
+            "en-GB,en;q=0.9",
+            "en-US,en;q=0.8,vi;q=0.6",
+            "en-GB,en-US;q=0.9,en;q=0.8"
+        ],
+        env="SOFASCORE_ACCEPT_LANGUAGES",
+        description="Danh sách Accept-Language để xoay vòng, phân tách bằng dấu ; hoặc newline."
+    )
+    
+    # Session management
+    session_rotation_interval: int = Field(default=100, env="SOFASCORE_SESSION_ROTATION", gt=0)  # Rotate session sau N requests
+    enable_cookies: bool = Field(default=True, env="SOFASCORE_ENABLE_COOKIES")
+    
+    @field_validator("base_url", "web_base_url")
     @classmethod
     def validate_https(cls, value: AnyUrl) -> AnyUrl:
         """Đảm bảo chỉ sử dụng HTTPS cho bảo mật"""
         if not value or str(value).strip() == "":
-            raise ValueError("Sofascore base URL cannot be empty")
+            raise ValueError("Sofascore URL cannot be empty")
         if value.scheme != "https":
-            raise ValueError("Sofascore base URL must use HTTPS for security")
+            raise ValueError("Sofascore URL must use HTTPS for security")
         return value
 
-    @field_validator("user_agents", mode="before")
+    @field_validator("user_agents", "accept_languages", mode="before")
     @classmethod
-    def parse_user_agents(cls, value) -> List[str]:
-        """Parse user agents từ string hoặc list"""
+    def parse_string_list(cls, value, field_info) -> List[str]:
+        """Parse user agents/languages từ string hoặc list"""
+        field_name = field_info.field_name
+        
+        # Get default values - FIX: Access default_factory properly
+        if field_name == "user_agents":
+            default_value = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0"
+            ]
+        else:  # accept_languages
+            default_value = [
+                "en-US,en;q=0.9",
+                "en-GB,en;q=0.9",
+                "en-US,en;q=0.8,vi;q=0.6",
+                "en-GB,en-US;q=0.9,en;q=0.8"
+            ]
+        
         if not value:
-            return cls.model_fields['user_agents'].default_factory()
+            return default_value
         
         if isinstance(value, str):
             # Split by semicolon hoặc newline
-            agents = []
-            for separator in [";", "\n"]:
+            items = []
+            for separator in [";", "\n", "|"]:
                 if separator in value:
-                    agents = [ua.strip() for ua in value.split(separator) if ua.strip()]
+                    items = [item.strip() for item in value.split(separator) if item.strip()]
                     break
             else:
-                agents = [value.strip()] if value.strip() else []
-            return agents if agents else cls.model_fields['user_agents'].default_factory()
+                items = [value.strip()] if value.strip() else []
+            return items if items else default_value
         
         if isinstance(value, list):
-            return [str(ua).strip() for ua in value if str(ua).strip()]
+            return [str(item).strip() for item in value if str(item).strip()]
         
-        return cls.model_fields['user_agents'].default_factory()
+        return default_value
 
     def get_random_user_agent(self) -> str:
         """Lấy ngẫu nhiên một User-Agent"""
         return random.choice(self.user_agents)
+    
+    def get_random_accept_language(self) -> str:
+        """Lấy ngẫu nhiên một Accept-Language"""
+        return random.choice(self.accept_languages)
 
-    def get_headers(self) -> Dict[str, str]:
-        """Tạo headers cho request"""
-        return {
+    def get_headers(self, referer: Optional[str] = None) -> Dict[str, str]:
+        """Tạo headers cho request với randomization"""
+        headers = {
             "User-Agent": self.get_random_user_agent(),
             "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Language": self.get_random_accept_language(),
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site"
+            "Sec-Fetch-Site": "same-site",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache"
         }
+        
+        if referer:
+            headers["Referer"] = referer
+        
+        # Random DNT header
+        if random.choice([True, False]):
+            headers["DNT"] = "1"
+            
+        return headers
 
-    @property
+    # Trong SofascoreSettings, cải thiện get_season_id_mapping method:
+    def get_season_id_mapping(self) -> Dict[str, int]:
+        """Get season name to SofaScore season ID mapping with validation"""
+        try:
+            from .core_constants import SofascoreConstants
+            season_ids = SofascoreConstants.SEASON_IDS.copy()
+            
+            # Validate that all season IDs are integers
+            validated_ids = {}
+            for season_name, season_id in season_ids.items():
+                if isinstance(season_id, int) and season_id > 0:
+                    validated_ids[season_name] = season_id
+                else:
+                    logging.warning(f"Invalid season ID for {season_name}: {season_id}")
+                    
+            return validated_ids
+            
+        except ImportError as e:
+            logging.error(f"Cannot import SofascoreConstants: {e}")
+            return {}
+        except Exception as e:
+            logging.error(f"Error getting season ID mapping: {e}")
+            return {}
+
+    # Helper method để get season ID from year:
+    def get_season_id_from_year(self, year: int) -> Optional[int]:
+        """Get SofaScore season ID from year (e.g., 2023 -> season ID for 2023/24)"""
+        season_mapping = self.supported_seasons  # Dict[int, str] - e.g., {2023: "2023/24"}
+        sofascore_mapping = self.get_season_id_mapping()  # Dict[str, int] - e.g., {"2023/24": 52186}
+        
+        season_name = season_mapping.get(year)
+        if not season_name:
+            return None
+            
+        return sofascore_mapping.get(season_name)
+
+    # Enhanced target seasons method with proper typing:
+    def get_target_seasons_with_ids(self) -> List[Tuple[int, str, int]]:
+        """
+        Get target seasons with their SofaScore IDs
+        Returns: List of (year, season_name, sofascore_id)
+        """
+        target_seasons = self.seasons.get_target_seasons()  # List[Tuple[int, str]]
+        sofascore_ids = self.get_season_id_mapping()  # Dict[str, int]
+        
+        result = []
+        for year, season_name in target_seasons:
+            sofascore_id = sofascore_ids.get(season_name)
+            if sofascore_id:
+                result.append((year, season_name, sofascore_id))
+            else:
+                logging.warning(f"No SofaScore ID found for season {season_name}")
+                
+        return result
+
+    def validate_season_consistency(self) -> bool:
+        """Validate rằng supported_seasons khớp với SofaScore season IDs"""
+        try:
+            from .core_constants import SofascoreConstants
+            
+            sofascore_seasons = set(SofascoreConstants.SEASON_IDS.keys())
+            config_seasons = set(self.get_season_id_mapping().values())  # Get season names
+            supported_seasons = set(self.supported_seasons.values())
+            
+            # Check if all config seasons have corresponding SofaScore IDs
+            missing_in_sofascore = supported_seasons - sofascore_seasons
+            if missing_in_sofascore:
+                logging.warning(f"Seasons missing in SofaScore constants: {missing_in_sofascore}")
+                return False
+                
+            # Check if all SofaScore seasons are supported
+            missing_in_config = sofascore_seasons - supported_seasons
+            if missing_in_config:
+                logging.info(f"SofaScore seasons not configured: {missing_in_config}")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error validating season consistency: {e}")
+            return False
+
+    @property 
     def is_configured(self) -> bool:
-        """Kiểm tra Sofascore có được cấu hình đầy đủ không"""
-        return bool(self.base_url and self.premier_league_id)
+        """Kiểm tra Sofascore có được cấu hình đầy đủ không - Enhanced with season validation"""
+        basic_config = bool(
+            self.base_url and 
+            self.premier_league_id and 
+            self.user_agents and
+            self.requests_per_minute > 0
+        )
+        
+        if not basic_config:
+            return False
+            
+        # Optional: Validate season consistency
+        try:
+            season_valid = self.validate_season_consistency()
+            if not season_valid:
+                logging.warning("Season configuration inconsistency detected")
+            return True  # Don't fail on season inconsistency, just warn
+        except:
+            return True  # Don't fail if validation has issues
 
 
 class ScrapingSettings(BaseSettings):
-    """Cấu hình chung cho web scraping"""
+    """Cấu hình chung cho web scraping - Enhanced"""
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_PATH,
         env_file_encoding="utf-8",
@@ -264,34 +404,51 @@ class ScrapingSettings(BaseSettings):
         extra="ignore"
     )
     
-    # Timeout configuration
-    request_timeout: int = Field(default=30, env="SCRAPING_TIMEOUT", gt=0)
-    connect_timeout: int = Field(default=10, env="SCRAPING_CONNECT_TIMEOUT", gt=0)
+    # Timeout configuration - Tăng timeout cho scraping
+    request_timeout: int = Field(default=45, env="SCRAPING_TIMEOUT", gt=0)
+    connect_timeout: int = Field(default=15, env="SCRAPING_CONNECT_TIMEOUT", gt=0)
+    read_timeout: int = Field(default=30, env="SCRAPING_READ_TIMEOUT", gt=0)
     
-    # Retry configuration
-    max_retries: int = Field(default=3, env="SCRAPING_MAX_RETRIES", ge=1)
-    retry_delay: float = Field(default=1.0, env="SCRAPING_RETRY_DELAY", ge=0.1)
-    backoff_factor: float = Field(default=2.0, env="SCRAPING_BACKOFF_FACTOR", ge=1.0)
+    # Retry configuration - Enhanced
+    max_retries: int = Field(default=5, env="SCRAPING_MAX_RETRIES", ge=1)
+    retry_delay: float = Field(default=2.0, env="SCRAPING_RETRY_DELAY", ge=0.5)
+    backoff_factor: float = Field(default=2.5, env="SCRAPING_BACKOFF_FACTOR", ge=1.0)
     
-    # Rate limiting
-    delay_between_requests: float = Field(default=1.0, env="SCRAPING_DELAY", ge=0.1)
-    concurrent_requests: int = Field(default=5, env="SCRAPING_CONCURRENT", ge=1, le=20)
+    # Rate limiting - Stricter for scraping
+    delay_between_requests: float = Field(default=2.0, env="SCRAPING_DELAY", ge=0.5)
+    random_delay_range: Tuple[float, float] = Field(default=(1.0, 3.0), env="SCRAPING_RANDOM_DELAY")
+    concurrent_requests: int = Field(default=3, env="SCRAPING_CONCURRENT", ge=1, le=10)  # Giảm concurrent
     
-    # Browser simulation
+    # Browser simulation - Enhanced
     enable_javascript: bool = Field(default=False, env="SCRAPING_ENABLE_JS")
     headless: bool = Field(default=True, env="SCRAPING_HEADLESS")
+    browser_type: str = Field(default="chrome", env="SCRAPING_BROWSER")  # chrome, firefox, safari
     
-    # Proxy configuration (optional)
+    # Proxy configuration
     proxy_urls: List[str] = Field(default_factory=list, env="SCRAPING_PROXIES")
     rotate_proxies: bool = Field(default=False, env="SCRAPING_ROTATE_PROXIES")
+    proxy_rotation_interval: int = Field(default=50, env="SCRAPING_PROXY_ROTATION", gt=0)
     
-    # Cache configuration
+    # Cache configuration - Enhanced
     enable_cache: bool = Field(default=True, env="SCRAPING_ENABLE_CACHE")
-    cache_ttl: int = Field(default=3600, env="SCRAPING_CACHE_TTL", gt=0)  # 1 hour
+    cache_ttl: int = Field(default=7200, env="SCRAPING_CACHE_TTL", gt=0)  # 2 hours
+    cache_dir: str = Field(default="cache/scraping", env="SCRAPING_CACHE_DIR")
     
-    # Error handling
+    # Error handling - Enhanced
     ignore_ssl_errors: bool = Field(default=False, env="SCRAPING_IGNORE_SSL")
+    ignore_robots_txt: bool = Field(default=True, env="SCRAPING_IGNORE_ROBOTS")  # For API scraping
+    max_redirects: int = Field(default=5, env="SCRAPING_MAX_REDIRECTS", ge=0, le=10)
     
+    # Data quality settings
+    validate_json_response: bool = Field(default=True, env="SCRAPING_VALIDATE_JSON")
+    min_response_size: int = Field(default=10, env="SCRAPING_MIN_RESPONSE_SIZE", ge=0)
+    max_response_size: int = Field(default=10485760, env="SCRAPING_MAX_RESPONSE_SIZE", gt=0)  # 10MB
+    
+    # Monitoring and logging
+    enable_metrics: bool = Field(default=True, env="SCRAPING_ENABLE_METRICS")
+    log_failed_requests: bool = Field(default=True, env="SCRAPING_LOG_FAILURES")
+    save_failed_responses: bool = Field(default=False, env="SCRAPING_SAVE_FAILURES")
+
     @field_validator("proxy_urls", mode="before")
     @classmethod
     def parse_proxy_urls(cls, value) -> List[str]:
@@ -300,9 +457,8 @@ class ScrapingSettings(BaseSettings):
             return []
         
         if isinstance(value, str):
-            # Split by comma hoặc semicolon
             proxies = []
-            for separator in [",", ";"]:
+            for separator in [",", ";", "\n"]:
                 if separator in value:
                     proxies = [p.strip() for p in value.split(separator) if p.strip()]
                     break
@@ -314,6 +470,30 @@ class ScrapingSettings(BaseSettings):
             return [str(proxy).strip() for proxy in value if str(proxy).strip()]
         
         return []
+
+    @field_validator("random_delay_range", mode="before")
+    @classmethod
+    def parse_delay_range(cls, value) -> Tuple[float, float]:
+        """Parse delay range từ string hoặc tuple"""
+        if isinstance(value, str):
+            try:
+                if "," in value:
+                    parts = value.split(",")
+                    return (float(parts[0].strip()), float(parts[1].strip()))
+                elif "-" in value:
+                    parts = value.split("-")
+                    return (float(parts[0].strip()), float(parts[1].strip()))
+            except (ValueError, IndexError):
+                pass
+        elif isinstance(value, (list, tuple)) and len(value) == 2:
+            return (float(value[0]), float(value[1]))
+        
+        return (1.0, 3.0)  # Default
+
+    def get_random_delay(self) -> float:
+        """Tạo delay ngẫu nhiên trong khoảng cho phép"""
+        min_delay, max_delay = self.random_delay_range
+        return random.uniform(min_delay, max_delay)
 
     def get_random_proxy(self) -> Optional[str]:
         """Lấy ngẫu nhiên một proxy (nếu có)"""
@@ -327,7 +507,8 @@ class ScrapingSettings(BaseSettings):
         return (
             self.request_timeout > 0 and 
             self.max_retries >= 1 and 
-            self.concurrent_requests >= 1
+            self.concurrent_requests >= 1 and
+            self.random_delay_range[0] < self.random_delay_range[1]
         )
 
 
@@ -340,12 +521,17 @@ class SeasonSettings(BaseSettings):
         extra="ignore"
     )
     
+    # Updated để bao gồm 7 seasons gần nhất
     raw_supported_seasons: str = Field(
-        default="2016:2016/17,2017:2017/18,2018:2018/19,2019:2019/20,2020:2020/21,2021:2021/22,2022:2022/23,2023:2023/24",
+        default="2017:2017/18,2018:2018/19,2019:2019/20,2020:2020/21,2021:2021/22,2022:2022/23,2023:2023/24,2024:2024/25",
         env="SUPPORTED_SEASONS"
     )
     timezone: str = Field(default="Europe/London", env="SEASON_TIMEZONE")
-
+    seasons_to_fetch: int = Field(
+        default=7, env="SEASONS_TO_FETCH", ge=1, le=15,
+        description="Số lượng mùa giải gần nhất (đã hoàn thành) để lấy dữ liệu."
+    )    
+    
     @property
     def supported_seasons(self) -> Dict[int, str]:
         try:
@@ -362,11 +548,11 @@ class SeasonSettings(BaseSettings):
 
     @classmethod
     def _get_default_seasons(cls) -> Dict[int, str]:
-        """Get default seasons mapping"""
+        """Get default seasons mapping - 7 seasons gần nhất"""
         return {
-            2016: "2016/17", 2017: "2017/18", 2018: "2018/19",
-            2019: "2019/20", 2020: "2020/21", 2021: "2021/22", 
-            2022: "2022/23", 2023: "2023/24", 2024: "2024/25"
+            2017: "2017/18", 2018: "2018/19", 2019: "2019/20",
+            2020: "2020/21", 2021: "2021/22", 2022: "2022/23", 
+            2023: "2023/24", 2024: "2024/25"
         }
 
     @field_validator("timezone")
@@ -392,91 +578,59 @@ class SeasonSettings(BaseSettings):
             return max(self.supported_seasons.keys())
 
     @property
-    def current_season(self) -> Tuple[int, int]:
-        """Xác định season hiện tại dựa trên thời gian (Aug-July cycle)"""
+    def current_season_year_start(self) -> int:
+        """Xác định năm bắt đầu của mùa giải hiện tại (ví dụ: 2023 cho mùa 2023/24)."""
         try:
             tz = pytz.timezone(self.timezone)
             now = datetime.now(tz)
-            year = now.year
-            
-            # Premier League season chạy từ tháng 8 năm X đến tháng 5 năm X+1
-            if now.month >= 8:  # Tháng 8-12
-                return (year, year + 1)
-            else:  # Tháng 1-7
-                return (year - 1, year)
+            # Mùa giải mới bắt đầu từ tháng 8
+            return now.year if now.month >= 8 else now.year - 1
         except Exception:
-            # Fallback to simple logic
-            year = datetime.now().year
-            return (year, year + 1) if datetime.now().month >= 8 else (year - 1, year)
+            # Fallback an toàn
+            now = datetime.utcnow()
+            return now.year if now.month >= 8 else now.year - 1
 
-    @property
-    def last_completed_season(self) -> Tuple[int, int]:
-        """Season đã hoàn thành gần nhất"""
-        start, end = self.current_season
-        return (start - 1, end - 1)
-
-    def get_seasons_to_fetch(self, start_year: int = 2016, min_count: int = 5) -> List[Tuple[int, int]]:
+    def get_target_seasons(self) -> List[Tuple[int, str]]:  # FIX: Change return type annotation
         """
-        Lấy danh sách seasons cần fetch data
-        Fixed: Không thể dùng @property với parameters
+        Lấy danh sách seasons target để scrape data (7 seasons gần nhất đã hoàn thành)
         """
         try:
-            current_start, current_end = self.current_season
+            current_start_year = self.current_season_year_start
             
-            # Generate seasons từ start_year đến current season (exclusive)
-            seasons = []
-            for year in range(start_year, current_start):
-                seasons.append((year, year + 1))
+            completed_seasons = [
+                (year, name) for year, name in self.supported_seasons.items()
+                if year < current_start_year
+            ]
             
-            # Đảm bảo có ít nhất min_count seasons
-            if len(seasons) < min_count:
-                extra_needed = min_count - len(seasons)
-                for i in range(1, extra_needed + 1):
-                    year = start_year - i
-                    if year > 2000:  # Sanity check
-                        seasons.insert(0, (year, year + 1))
+            # Sắp xếp giảm dần theo năm và lấy số lượng cần thiết
+            completed_seasons.sort(key=lambda x: x[0], reverse=True)
+            return completed_seasons[:self.seasons_to_fetch]
             
-            return seasons
-        except Exception:
-            # Fallback to basic logic
-            current_year = datetime.now().year
-            return [(y, y + 1) for y in range(max(2016, start_year), current_year)]
+        except Exception as e:
+            logging.error(f"Error getting target seasons: {e}. Using fallback.", exc_info=True)
+            # Fallback: Lấy các mùa giải mặc định và cắt theo số lượng
+            default_seasons = sorted(self._get_default_seasons().items(), key=lambda x: x[0], reverse=True)
+            return default_seasons[1:self.seasons_to_fetch + 1] # Bỏ mùa mới nhất (2024), lấy 7 mùa tiếp theo
 
 
-# Biến toàn cục (private) để lưu trữ instance duy nhất. Nó sẽ được khởi tạo TRỄ (lazy).
+# ConfigManager đã được cập nhật để bỏ APIFootball
 _config_instance: Optional['ConfigManager'] = None
 
 class ConfigManager:
-    """
-    Quản lý cấu hình ứng dụng.
-    Được khởi tạo một lần duy nhất thông qua hàm get_config().
-    """
-    # Không cần __new__ hay lock ở đây nữa, vì hàm get_config sẽ xử lý việc đó.
+    """Quản lý cấu hình ứng dụng - Updated for SofaScore scraping"""
     
     def __init__(self):
-        """
-        Constructor này chỉ nên được gọi MỘT LẦN DUY NHẤT bởi get_config().
-        Nó sẽ nạp và xác thực toàn bộ cấu hình.
-        """
-        # Thêm một log để biết chính xác khi nào nó được tạo
-        log = logging.getLogger(__name__)
-        log.info(">>>>>> Initializing a new ConfigManager instance... <<<<<<")
-        
-        # Biến này để đảm bảo __init__ không bị gọi lại trên cùng một đối tượng
-        # (mặc dù với cấu trúc mới, điều này khó xảy ra)
+        """Constructor - khởi tạo config cho SofaScore scraping"""
         if hasattr(self, '_initialized') and self._initialized:
             return
             
         self._load_config()
         self._initialized = True
-        log.info(">>>>>> ConfigManager instance initialized successfully. <<<<<<")
 
     def _load_config(self):
         """Load và validate tất cả config sections."""
         try:
-            # Pydantic-settings sẽ tự động đọc từ các biến môi trường đã được nạp
             self.db = DatabaseSettings()
-            self.api = APIFootballSettings()
             self.sofascore = SofascoreSettings()
             self.scraping = ScrapingSettings()
             self.seasons = SeasonSettings()
@@ -489,7 +643,7 @@ class ConfigManager:
             raise RuntimeError(error_msg) from e
 
     def _validate_critical_config(self):
-        """Validate các config quan trọng."""
+        """Validate các config quan trọng cho scraping"""
         log = logging.getLogger(__name__)
         errors = []
         
@@ -499,18 +653,14 @@ class ConfigManager:
         if not self.scraping.is_configured:
             errors.append("Scraping configuration is invalid.")
         
-        if not self.api.is_configured:
-            log.warning("API-Football is not configured - skipping API calls")
-        
         if not self.db.is_configured:
-            # Đây chỉ là cảnh báo, không phải lỗi nghiêm trọng
             log.warning("Database not fully configured - ensure this is intentional for dev/test environment")
         
         if errors:
             raise RuntimeError(f"Critical configuration errors: {'; '.join(errors)}")
 
     def reload_config(self):
-        """Nạp lại cấu hình. Hữu ích cho các kịch bản test hoặc cập nhật nóng."""
+        """Nạp lại cấu hình"""
         log = logging.getLogger(__name__)
         log.info("Reloading configuration...")
         self._load_config()
@@ -525,15 +675,8 @@ class ConfigManager:
         return not self.is_production
 
 def get_config() -> ConfigManager:
-    """
-    Hàm toàn cục để lấy instance cấu hình.
-    Đây là cổng vào DUY NHẤT và đảm bảo khởi tạo trễ (lazy initialization).
-    """
+    """Hàm toàn cục để lấy instance cấu hình"""
     global _config_instance
-    
-    # Chỉ khi instance chưa tồn tại, chúng ta mới tạo mới nó.
     if _config_instance is None:
-        # Dòng này sẽ chỉ chạy một lần trong suốt vòng đời của ứng dụng.
-        _config_instance = ConfigManager()
-        
+        _config_instance = ConfigManager()        
     return _config_instance

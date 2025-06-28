@@ -1,8 +1,12 @@
 # ai-engine/config/business_constants.py
 
 from enum import Enum
-from typing import List, Tuple, FrozenSet, Dict, Any, Optional
+from typing import List, Tuple, FrozenSet, Dict, Any, Optional, Union
 from functools import lru_cache
+from datetime import datetime, timedelta
+import pytz
+import logging
+
 from config.settings import get_config
 from .core_constants import (
     PlayerPosition,
@@ -18,6 +22,37 @@ from .core_constants import (
 def _get_config():
     """Cached lazy load configuration to avoid circular imports"""
     return get_config()
+
+# ======================== LEAGUE AND COMPETITION TYPES ========================
+class LeagueType(Enum):
+    """Phân loại các giải đấu"""
+    PREMIER_LEAGUE = "EPL"
+    CHAMPIONSHIP = "CHAMPIONSHIP"
+    LEAGUE_ONE = "LEAGUE_ONE"
+    LEAGUE_TWO = "LEAGUE_TWO"
+
+class MatchImportance(Enum):
+    """Mức độ quan trọng của trận đấu"""
+    HIGH = "HIGH"          # Derby, Top 6 clash, Title decider
+    MEDIUM = "MEDIUM"      # Mid-table vs Top 6, Relegation battle
+    LOW = "LOW"           # Mid-table clash
+    UNKNOWN = "UNKNOWN"
+
+class TeamCategory(Enum):
+    """Phân loại đội bóng theo thành tích"""
+    BIG_SIX = "BIG_SIX"           # Top 6 traditional teams
+    ESTABLISHED = "ESTABLISHED"   # Regularly in PL for 5+ years
+    PROMOTED = "PROMOTED"         # Recently promoted teams
+    RELEGATION_BATTLE = "RELEGATION_BATTLE"  # Fighting relegation
+    UNKNOWN = "UNKNOWN"
+
+class TeamPerformanceCategory(Enum):
+    """Categories for team performance analysis"""
+    EXCELLENT = "excellent"
+    GOOD = "good" 
+    AVERAGE = "average"
+    POOR = "poor"
+    VERY_POOR = "very_poor"
 
 # ======================== MATCH STATUSES ========================
 MatchStatusCategory = MatchStatus
@@ -200,15 +235,6 @@ PASS_ACCURACY_THRESHOLD = 0.8  # 80% pass accuracy
 HIGH_SCORING_THRESHOLD = 4  # 4+ goals total
 LOW_SCORING_THRESHOLD = 1   # 1 or fewer goals
 
-# ======================== TEAM PERFORMANCE CATEGORIES ========================
-class TeamPerformanceCategory(Enum):
-    """Categories for team performance analysis"""
-    EXCELLENT = "excellent"
-    GOOD = "good" 
-    AVERAGE = "average"
-    POOR = "poor"
-    VERY_POOR = "very_poor"
-
 # Performance thresholds (points per game)
 PERFORMANCE_THRESHOLDS = {
     TeamPerformanceCategory.EXCELLENT: 2.5,  # 95+ points in 38 games
@@ -234,6 +260,326 @@ PREMIER_LEAGUE_ROUNDS = 38
 WIN_POINTS = 3
 DRAW_POINTS = 1
 LOSS_POINTS = 0
+
+# ======================== BUSINESS RULES ========================
+class BusinessRules:
+    """Các quy tắc nghiệp vụ cho Premier League"""
+    
+    # Premier League Business Constants
+    SEASON_START_MONTH = 8  # August
+    SEASON_END_MONTH = 5    # May
+    TOTAL_TEAMS = 20
+    MATCHES_PER_TEAM_PER_SEASON = 38
+    TOTAL_MATCHES_PER_SEASON = 380
+    
+    # Points system
+    POINTS_WIN = 3
+    POINTS_DRAW = 1
+    POINTS_LOSS = 0
+    
+    # Table positions
+    CHAMPIONS_LEAGUE_POSITIONS = [1, 2, 3, 4]
+    EUROPA_LEAGUE_POSITIONS = [5]
+    CONFERENCE_LEAGUE_POSITIONS = [6]  # Winner of domestic cups
+    RELEGATION_POSITIONS = [18, 19, 20]
+    
+    # Historical Big Six teams (traditional top 6)
+    BIG_SIX_TEAMS = [
+        "Arsenal", "Chelsea", "Liverpool", 
+        "Manchester City", "Manchester United", "Tottenham"
+    ]
+    
+    # Team name variations and normalization
+    TEAM_NAME_MAPPING = {
+        # Manchester teams
+        "Manchester City": ["Man City", "Manchester City FC", "Man City FC"],
+        "Manchester United": ["Man United", "Manchester United FC", "Man Utd", "Man United FC"],
+        
+        # London teams
+        "Arsenal": ["Arsenal FC", "The Gunners"],
+        "Chelsea": ["Chelsea FC", "The Blues"],
+        "Tottenham": ["Tottenham Hotspur", "Spurs", "Tottenham Hotspur FC"],
+        "Crystal Palace": ["Crystal Palace FC", "Palace"],
+        "Fulham": ["Fulham FC"],
+        "West Ham": ["West Ham United", "West Ham United FC", "The Hammers"],
+        "Brentford": ["Brentford FC"],
+        
+        # Liverpool teams
+        "Liverpool": ["Liverpool FC", "The Reds"],
+        "Everton": ["Everton FC", "The Toffees"],
+        
+        # Other notable teams
+        "Newcastle": ["Newcastle United", "Newcastle United FC", "The Magpies"],
+        "Aston Villa": ["Aston Villa FC", "Villa"],
+        "Brighton": ["Brighton & Hove Albion", "Brighton & Hove Albion FC", "The Seagulls"],
+        "Leicester": ["Leicester City", "Leicester City FC", "The Foxes"],
+        "Leeds": ["Leeds United", "Leeds United FC"],
+        "Sheffield United": ["Sheffield United FC", "The Blades"],
+        "Wolverhampton": ["Wolves", "Wolverhampton Wanderers FC", "Wolves FC"]
+    }
+    
+    # Derby matches (high importance)
+    DERBY_MATCHES = {
+        "North London Derby": ["Arsenal", "Tottenham"],
+        "Manchester Derby": ["Manchester City", "Manchester United"],
+        "Merseyside Derby": ["Liverpool", "Everton"],
+        "London Derby": [
+            "Arsenal", "Chelsea", "Tottenham", "Crystal Palace", 
+            "Fulham", "West Ham", "Brentford"
+        ]
+    }
+    
+    # Match scheduling patterns
+    TYPICAL_KICKOFF_TIMES = {
+        "saturday_early": "12:30",
+        "saturday_main": "15:00", 
+        "saturday_late": "17:30",
+        "sunday_early": "14:00",
+        "sunday_late": "16:30",
+        "monday_night": "20:00",
+        "midweek": "19:45"
+    }
+    
+    # Season phases
+    SEASON_PHASES = {
+        "early": (8, 10),      # August - October
+        "autumn": (11, 12),    # November - December
+        "winter": (1, 2),      # January - February
+        "spring": (3, 5)       # March - May
+    }
+
+# ======================== DATA QUALITY RULES ========================
+class DataQualityRules:
+    """Quy tắc về chất lượng dữ liệu"""
+    
+    # Match data validation
+    MIN_MATCH_DURATION = 90  # minutes
+    MAX_MATCH_DURATION = 120  # with extra time
+    
+    MAX_GOALS_PER_TEAM = 10  # Reasonable upper limit
+    MAX_CARDS_PER_TEAM = 5   # Red cards would reduce players
+    
+    # Player statistics validation
+    MIN_PLAYER_MINUTES = 0
+    MAX_PLAYER_MINUTES = 120
+    
+    MAX_GOALS_PER_PLAYER_PER_MATCH = 5  # Theoretical maximum
+    MAX_ASSISTS_PER_PLAYER_PER_MATCH = 3
+    
+    # Team statistics validation
+    MIN_POSSESSION_PERCENTAGE = 0
+    MAX_POSSESSION_PERCENTAGE = 100
+    
+    MIN_SHOTS = 0
+    MAX_SHOTS = 50  # Very attacking game
+    
+    MAX_FOULS_PER_TEAM = 30
+    MAX_CORNERS_PER_TEAM = 20
+
+# ======================== SCRAPING BUSINESS RULES ========================
+class ScrapingBusinessRules:
+    """Quy tắc nghiệp vụ cho việc scraping dữ liệu"""
+    
+    # Data freshness requirements
+    MATCH_DATA_STALENESS_HOURS = 6  # Refresh match data if older than 6 hours
+    TEAM_STATS_STALENESS_DAYS = 1   # Refresh team stats daily
+    PLAYER_STATS_STALENESS_DAYS = 7 # Refresh player stats weekly
+    
+    # Scraping priorities
+    PRIORITY_MATCHES = [
+        "IN_PROGRESS",    # Live matches
+        "SCHEDULED",      # Upcoming matches
+        "FINISHED"        # Recently finished
+    ]
+    
+    # Retry logic for failed scraping
+    MAX_SCRAPING_RETRIES = 3
+    SCRAPING_RETRY_DELAY_SECONDS = [2, 5, 10]  # Exponential backoff
+    
+    # Data completeness requirements
+    REQUIRED_MATCH_FIELDS = [
+        "home_team", "away_team", "kickoff_time", 
+        "status", "home_score", "away_score"
+    ]
+    
+    OPTIONAL_MATCH_FIELDS = [
+        "referee", "venue", "attendance", "weather"
+    ]
+
+# ======================== ANALYTICS CONSTANTS ========================
+class AnalyticsConstants:
+    """Constants cho analytics và machine learning"""
+    
+    # Feature engineering
+    FORM_MATCHES_COUNT = 5  # Last 5 matches for form calculation
+    HEAD_TO_HEAD_MATCHES_COUNT = 10  # H2H history depth
+    
+    # Performance metrics
+    EXPECTED_GOALS_THRESHOLD = 0.1  # Minimum xG to be considered a chance
+    BIG_CHANCE_XG_THRESHOLD = 0.35  # xG threshold for "big chances"
+    
+    # Team strength indicators
+    BIG_WIN_GOAL_DIFFERENCE = 3  # 3+ goal margin
+    COMFORTABLE_WIN_GOAL_DIFFERENCE = 2
+    
+    # Home advantage
+    HISTORICAL_HOME_WIN_PERCENTAGE = 46  # Historical Premier League average
+    HISTORICAL_AWAY_WIN_PERCENTAGE = 29
+    HISTORICAL_DRAW_PERCENTAGE = 25
+
+# ======================== SEASON BUSINESS LOGIC ========================
+class SeasonBusinessLogic:
+    """Logic nghiệp vụ liên quan đến mùa giải"""
+    
+    @staticmethod
+    def get_season_from_year(year: int) -> str:
+        """Convert năm thành tên mùa giải (ví dụ: 2023 -> "2023/24")"""
+        return f"{year}/{str(year + 1)[-2:]}"
+    
+    @staticmethod
+    def extract_year_from_season(season: str) -> int:
+        """Extract năm bắt đầu từ tên mùa giải (ví dụ: "2023/24" -> 2023)"""
+        try:
+            return int(season.split('/')[0])
+        except (ValueError, IndexError):
+            raise ValueError(f"Invalid season format: {season}")
+    
+    @staticmethod
+    def is_season_complete(season: str, timezone: str = "Europe/London") -> bool:
+        """Kiểm tra mùa giải đã hoàn thành chưa"""
+        try:
+            season_year = SeasonBusinessLogic.extract_year_from_season(season)
+            season_end_year = season_year + 1
+            
+            tz = pytz.timezone(timezone)
+            now = datetime.now(tz)
+            
+            # Mùa giải kết thúc vào cuối tháng 5
+            season_end = tz.localize(datetime(season_end_year, 5, 31))
+            
+            return now > season_end
+        except Exception:
+            return False
+    
+    @staticmethod
+    def get_current_season(timezone: str = "Europe/London") -> str:
+        """Lấy mùa giải hiện tại"""
+        try:
+            tz = pytz.timezone(timezone)
+            now = datetime.now(tz)
+            
+            # Mùa giải mới bắt đầu từ tháng 8
+            if now.month >= BusinessRules.SEASON_START_MONTH:
+                season_start_year = now.year
+            else:
+                season_start_year = now.year - 1
+                
+            return SeasonBusinessLogic.get_season_from_year(season_start_year)
+        except Exception:
+            # Fallback
+            current_year = datetime.now().year
+            if datetime.now().month >= 8:
+                return f"{current_year}/{str(current_year + 1)[-2:]}"
+            else:
+                return f"{current_year - 1}/{str(current_year)[-2:]}"
+
+# ======================== MATCH BUSINESS LOGIC ========================
+class MatchBusinessLogic:
+    """Logic nghiệp vụ liên quan đến trận đấu"""
+    
+    @staticmethod
+    def determine_match_importance(home_team: str, away_team: str) -> MatchImportance:
+        """Xác định mức độ quan trọng của trận đấu"""
+        
+        # Check if it's a derby
+        for derby_name, teams in BusinessRules.DERBY_MATCHES.items():
+            if home_team in teams and away_team in teams:
+                return MatchImportance.HIGH
+        
+        # Check if both teams are Big Six
+        both_big_six = (
+            home_team in BusinessRules.BIG_SIX_TEAMS and 
+            away_team in BusinessRules.BIG_SIX_TEAMS
+        )
+        if both_big_six:
+            return MatchImportance.HIGH
+        
+        # One team is Big Six
+        one_big_six = (
+            home_team in BusinessRules.BIG_SIX_TEAMS or 
+            away_team in BusinessRules.BIG_SIX_TEAMS
+        )
+        if one_big_six:
+            return MatchImportance.MEDIUM
+        
+        return MatchImportance.LOW
+    
+    @staticmethod
+    def normalize_team_name(team_name: str) -> str:
+        """Chuẩn hóa tên đội bóng"""
+        if not team_name:
+            return ""
+        
+        team_name = team_name.strip()
+        
+        # Check exact matches first
+        for standard_name, variations in BusinessRules.TEAM_NAME_MAPPING.items():
+            if team_name == standard_name:
+                return standard_name
+            if team_name in variations:
+                return standard_name
+        
+        # If no match found, return original (title case)
+        return team_name.title()
+    
+    @staticmethod
+    def calculate_points(goals_for: int, goals_against: int) -> int:
+        """Tính điểm từ kết quả trận đấu"""
+        if goals_for > goals_against:
+            return BusinessRules.POINTS_WIN
+        elif goals_for == goals_against:
+            return BusinessRules.POINTS_DRAW
+        else:
+            return BusinessRules.POINTS_LOSS
+    
+    @staticmethod
+    def is_big_win(goals_for: int, goals_against: int) -> bool:
+        """Kiểm tra có phải thắng đậm không"""
+        return (goals_for - goals_against) >= AnalyticsConstants.BIG_WIN_GOAL_DIFFERENCE
+
+# ======================== VALIDATION RULES ========================
+class ValidationRules:
+    """Các quy tắc validation dữ liệu"""
+    
+    @staticmethod
+    def validate_match_score(home_score: Optional[int], away_score: Optional[int]) -> bool:
+        """Validate điểm số trận đấu"""
+        if home_score is None or away_score is None:
+            return False
+        
+        return (
+            0 <= home_score <= DataQualityRules.MAX_GOALS_PER_TEAM and
+            0 <= away_score <= DataQualityRules.MAX_GOALS_PER_TEAM
+        )
+    
+    @staticmethod
+    def validate_possession(home_possession: Optional[float], away_possession: Optional[float]) -> bool:
+        """Validate possession percentage"""
+        if home_possession is None or away_possession is None:
+            return False
+        
+        # Should add up to approximately 100%
+        total = home_possession + away_possession
+        return 99 <= total <= 101  # Allow small rounding errors
+    
+    @staticmethod
+    def validate_team_name(team_name: str) -> bool:
+        """Validate tên đội bóng"""
+        if not team_name or not isinstance(team_name, str):
+            return False
+        
+        # Should not be empty after stripping
+        return len(team_name.strip()) > 0
 
 # ======================== UTILITY FUNCTIONS ========================
 def format_season(start_year: int, end_year: int) -> str:
@@ -299,13 +645,52 @@ def validate_constants():
     if errors:
         raise ValueError(f"Business constants validation failed: {'; '.join(errors)}")
 
-# Run validation on import (with error handling)
-try:
-    validate_constants()
-except Exception as e:
-    # Log warning but don't crash on import
-    import logging
+# ======================== MODULE EXPORTS ========================
+__all__ = [
+    # Enums
+    'LeagueType', 'MatchImportance', 'TeamCategory', 'TeamPerformanceCategory',
+    'MLOutcomeLabels', 'MatchStatusCategory',
+    
+    # Classes
+    'BusinessRules', 'DataQualityRules', 'ScrapingBusinessRules',
+    'AnalyticsConstants', 'SeasonBusinessLogic', 'MatchBusinessLogic',
+    'ValidationRules',
+    
+    # Constants
+    'MATCH_STATUS_MAPPING', 'POSITION_MAPPING', 'OUTCOME_MAPPING',
+    'VALID_ENTITY_TYPES', 'SEASON_FORMAT', 'SEASONS_TO_FETCH',
+    'PLAYER_POSITION_LABELS', 'MATCH_STATUS_LABELS',
+    'POSITION_LABELS_REVERSE', 'STATUS_LABELS_REVERSE',
+    'LABEL_MAPPERS', 'PERFORMANCE_THRESHOLDS',
+    
+    # Match constants
+    'MINUTES_IN_MATCH', 'EXTRA_TIME_MINUTES', 'PENALTY_SHOOTOUT_ROUNDS',
+    'HALFTIME_BREAK_MINUTES', 'FIRST_HALF_MINUTES', 'SECOND_HALF_MINUTES',
+    'FIRST_EXTRA_TIME_MINUTES', 'SECOND_EXTRA_TIME_MINUTES',
+    
+    # Thresholds
+    'POSSESSION_THRESHOLD', 'SHOTS_ON_TARGET_THRESHOLD', 'CORNERS_THRESHOLD',
+    'CARDS_THRESHOLD', 'FOULS_THRESHOLD', 'PASS_ACCURACY_THRESHOLD',
+    'HIGH_SCORING_THRESHOLD', 'LOW_SCORING_THRESHOLD',
+    
+    # League constants
+    'PREMIER_LEAGUE_TEAMS', 'PREMIER_LEAGUE_MATCHES_PER_SEASON',
+    'PREMIER_LEAGUE_ROUNDS', 'WIN_POINTS', 'DRAW_POINTS', 'LOSS_POINTS',
+    
+    # Functions
+    'get_current_season', 'get_last_completed_season', 'get_seasons_to_fetch',
+    'get_default_seasons_to_fetch', 'categorize_team_performance',
+    'encode_player_position', 'decode_player_position',
+    'encode_match_status', 'decode_match_status',
+    'format_season', 'parse_season_string', 'is_valid_season',
+    'validate_constants'
+]
+
+# Run validation
+if __name__ == "__main__":
     try:
-        logging.warning(f"Business constants validation warning: {e}")
-    except:
-        print(f"WARNING: Business constants validation: {e}")
+        validate_constants()
+        print("Business constants validation passed.")
+    except Exception as e:
+        print(f"Business constants validation failed: {e}")
+
