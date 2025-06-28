@@ -58,9 +58,6 @@ def main():
     print(f"Accept-Languages count: {len(cfg.sofascore.accept_languages)}")
     print(f"Sample headers: {cfg.sofascore.get_headers()}")
     print(f"Is configured: {cfg.sofascore.is_configured}")
-    print("Sample API endpoints:")
-    for name, url in cfg.sofascore.get_api_endpoints().items():
-        print(f"  - {name}: {url[:60]}...")
 
     # === Scraping ===
     print("\n[Scraping Settings]")
