@@ -1,4 +1,4 @@
-# main_corrected.py
+# main_correct.py
 
 import sys
 import signal
@@ -7,18 +7,13 @@ from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime
 import argparse
 
-# --- Bước 1: Khởi tạo cơ bản và thiết lập môi trường ---
-# Luôn import và chạy các hàm này đầu tiên
-from config.env_loader import load_environment
-load_environment() # NẠP BIẾN MÔI TRƯỜNG TỪ .ENV
-
 from utils.logging_config import setup_logging
 # Bây giờ mới thiết lập logging, có thể truyền tham số từ command line
 # setup_logging() # Sẽ được gọi trong main() để nhận log_level
 
 # --- Bước 2: Import các thành phần của hệ thống ---
 from config.settings import get_config
-from elt_pipeline.extract.sofascore_client import SofascoreClient, ClientError
+from elt_pipeline.extract.sofascore_extractor import SofascoreClient, ClientError
 # Giả sử bạn có các module này để thực hiện Transform và Load
 # from elt_pipeline.transform.sofascore_parser import SofascoreDataParser 
 # from elt_pipeline.load.database_loader import DatabaseLoader
@@ -126,7 +121,7 @@ def run_extraction(specific_seasons: Optional[List[str]] = None):
 
     # Lấy danh sách mùa giải từ cấu hình
     # Giả định get_target_seasons_with_ids đã có trong SofascoreSettings
-    all_seasons = config.sofascore.get_target_seasons_with_ids()
+    all_seasons = config.get_target_seasons_with_ids()
     tournament_id = config.sofascore.premier_league_id
 
     # ... (giữ nguyên logic filter seasons của bạn) ...
@@ -134,8 +129,9 @@ def run_extraction(specific_seasons: Optional[List[str]] = None):
 
     success_count = 0
     error_count = 0
-    for season_id, season_name, _ in seasons_to_process: # Lấy cả sofascore_id
-        if process_season(client, parser, loader, season_id, season_name, tournament_id):
+
+    for year, season_name, sofascore_id in seasons_to_process:
+        if process_season(client, parser, loader, sofascore_id, season_name, tournament_id):
             success_count += 1
         else:
             error_count += 1
