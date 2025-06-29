@@ -54,8 +54,12 @@ class SofaScoreExtractor:
                 response = self.session.get(url, headers=headers, timeout=timeout)
                 
                 if response.status_code == 404:
-                    logger.info("Endpoint returned 404, assumed end of data.", extra={"url": url})
-                    return None # Trả về None cho 404 để loop phân trang dừng lại
+                    if endpoint == SofaScoreEndpoints.SEASON_MATCHES and 'page' in kwargs:
+                        logger.info("End of pagination reached", extra={"url": url})
+                        return None  # Kết thúc pagination bình thường
+                    else:
+                        logger.warning("Resource not found", extra={"url": url})
+                        return None  # Resource không tồn tại
 
                 response.raise_for_status() # Ném exception cho các mã lỗi 4xx, 5xx khác
                 return response.json()
@@ -80,10 +84,10 @@ class SofaScoreExtractor:
             data = self._make_request(endpoint, **kwargs)
             
             # API trả về 'events' cho danh sách trận đấu
-            items = data.get("events") if data and "events" in data else data
+            items = data.get("events", []) if data else []
 
-            if not items:
-                logger.info("No more items found, stopping pagination.", extra={"endpoint": endpoint.name, "last_page": page-1})
+            if not isinstance(items, list) or not items:
+                logger.info("No more items found or response is not a list, stopping pagination.", extra={"endpoint": endpoint.name, "last_page": page-1})
                 break
             
             all_items.extend(items)
@@ -111,8 +115,3 @@ class SofaScoreExtractor:
         """Đóng session khi hoàn tất."""
         self.session.close()
         logger.info("SofaScoreClient session closed.")
-
-
-
-
-
