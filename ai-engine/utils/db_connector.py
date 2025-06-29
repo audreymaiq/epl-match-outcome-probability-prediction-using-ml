@@ -6,7 +6,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from sqlalchemy.pool import QueuePool
-from config.settings import get_config  # Fixed import
+from config.settings import get_config
+from sqlalchemy import create_engine, text
 import time
 import threading
 from typing import Optional, Dict, Any

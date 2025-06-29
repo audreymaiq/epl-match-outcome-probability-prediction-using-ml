@@ -141,7 +141,8 @@ CREATE TABLE "Matches" (
   CONSTRAINT chk_outcome_if_finished CHECK (
     (status = 'FINISHED' AND outcome IS NOT NULL) OR 
     (status <> 'FINISHED' AND outcome IS NULL)
-  )
+  ),
+  CONSTRAINT uq_match_unique UNIQUE (match_datetime, home_team_id, away_team_id)
 );
 COMMENT ON TABLE "Matches" IS 'Details of individual football matches. CHECK (home_team_id <> away_team_id)';
 COMMENT ON COLUMN "Matches"."home_goals" IS 'NULL nếu match chưa FINISHED. CHECK >= 0';

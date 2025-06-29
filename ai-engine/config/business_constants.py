@@ -5,17 +5,17 @@ from typing import List, Tuple, FrozenSet, Dict, Any, Optional, Union
 from functools import lru_cache
 from datetime import datetime, timedelta
 import pytz
-import logging
 
 from config.settings import get_config
-from .core_constants import (
-    PlayerPosition,
-    MatchStatus,
-    MatchOutcome,
-    API_STATUS_MAPPING,
-    API_POSITION_MAPPING,
-    API_OUTCOME_MAPPING
-)
+# from .core_constants import (
+#     PlayerPosition,
+#     MatchStatus,
+#     MatchOutcome,
+#     API_STATUS_MAPPING,
+#     API_POSITION_MAPPING,
+#     API_OUTCOME_MAPPING
+# )
+from .core_constants import PlayerPosition, MatchStatus, MatchOutcome
 
 # ======================== CONFIGURATION LOADING ========================
 @lru_cache(maxsize=1)
@@ -56,10 +56,10 @@ class TeamPerformanceCategory(Enum):
 
 # ======================== MATCH STATUSES ========================
 MatchStatusCategory = MatchStatus
-MATCH_STATUS_MAPPING = API_STATUS_MAPPING
+# MATCH_STATUS_MAPPING = API_STATUS_MAPPING
 
 # ======================== PLAYER POSITIONS ========================
-POSITION_MAPPING = API_POSITION_MAPPING
+# POSITION_MAPPING = API_POSITION_MAPPING
 
 # ======================== ENTITY TYPES ========================
 VALID_ENTITY_TYPES: FrozenSet[str] = frozenset({
@@ -67,35 +67,35 @@ VALID_ENTITY_TYPES: FrozenSet[str] = frozenset({
 })
 
 # ======================== MATCH OUTCOMES ========================
-OUTCOME_MAPPING = API_OUTCOME_MAPPING
+# OUTCOME_MAPPING = API_OUTCOME_MAPPING
 
 # ======================== SEASON CONSTANTS ========================
-@lru_cache(maxsize=1)
-def get_current_season() -> Tuple[int, int]:
-    """Get current season dynamically with caching"""
-    return _get_config().seasons.current_season
+# @lru_cache(maxsize=1)
+# def get_current_season() -> Tuple[int, int]:
+#     """Get current season dynamically with caching"""
+#     return _get_config().seasons.current_season
 
-@lru_cache(maxsize=1)
-def get_last_completed_season() -> Tuple[int, int]:
-    """Get last completed season dynamically with caching"""
-    return _get_config().seasons.last_completed_season
+# @lru_cache(maxsize=1)
+# def get_last_completed_season() -> Tuple[int, int]:
+#     """Get last completed season dynamically with caching"""
+#     return _get_config().seasons.last_completed_season
 
-@lru_cache(maxsize=16)  
-def get_seasons_to_fetch(start_year: int = 2018, min_count: int = 5) -> List[Tuple[int, int]]:
-    """Get seasons to fetch with parameters and caching"""
-    return _get_config().seasons.get_seasons_to_fetch(start_year, min_count)
+# @lru_cache(maxsize=16)  
+# def get_seasons_to_fetch(start_year: int = 2018, min_count: int = 5) -> List[Tuple[int, int]]:
+#     """Get seasons to fetch with parameters and caching"""
+#     return _get_config().seasons.get_seasons_to_fetch(start_year, min_count)
 
 # Constants that can be computed once
 SEASON_FORMAT: str = "{start}/{end}"
 
 # ======================== SEASONS TO FETCH ========================
 # Backward compatibility - use default parameters
-def get_default_seasons_to_fetch() -> List[Tuple[int, int]]:
-    """Get default seasons to fetch"""
-    return get_seasons_to_fetch()
+# def get_default_seasons_to_fetch() -> List[Tuple[int, int]]:
+#     """Get default seasons to fetch"""
+#     return get_seasons_to_fetch()
 
 # For backward compatibility
-SEASONS_TO_FETCH = get_default_seasons_to_fetch()
+# SEASONS_TO_FETCH = get_default_seasons_to_fetch()
 
 # ======================== ML LABEL MAPPINGS ========================
 class MLOutcomeLabels(Enum):
@@ -657,8 +657,8 @@ __all__ = [
     'ValidationRules',
     
     # Constants
-    'MATCH_STATUS_MAPPING', 'POSITION_MAPPING', 'OUTCOME_MAPPING',
-    'VALID_ENTITY_TYPES', 'SEASON_FORMAT', 'SEASONS_TO_FETCH',
+    # 'MATCH_STATUS_MAPPING', 'POSITION_MAPPING', 'OUTCOME_MAPPING','SEASONS_TO_FETCH',
+    'VALID_ENTITY_TYPES', 'SEASON_FORMAT', 
     'PLAYER_POSITION_LABELS', 'MATCH_STATUS_LABELS',
     'POSITION_LABELS_REVERSE', 'STATUS_LABELS_REVERSE',
     'LABEL_MAPPERS', 'PERFORMANCE_THRESHOLDS',
@@ -678,8 +678,9 @@ __all__ = [
     'PREMIER_LEAGUE_ROUNDS', 'WIN_POINTS', 'DRAW_POINTS', 'LOSS_POINTS',
     
     # Functions
-    'get_current_season', 'get_last_completed_season', 'get_seasons_to_fetch',
-    'get_default_seasons_to_fetch', 'categorize_team_performance',
+    # 'get_current_season', 'get_last_completed_season', 'get_seasons_to_fetch',
+    # 'get_default_seasons_to_fetch', 
+    'categorize_team_performance',
     'encode_player_position', 'decode_player_position',
     'encode_match_status', 'decode_match_status',
     'format_season', 'parse_season_string', 'is_valid_season',

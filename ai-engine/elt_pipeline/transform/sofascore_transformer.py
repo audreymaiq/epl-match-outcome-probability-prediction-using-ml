@@ -122,13 +122,25 @@ class SofaScoreTransformer:
                 raise ValueError("League name or country is missing.")
 
             parsed_league = ParsedLeague(name=league_name, country=league_country)
+            
+            # Ưu tiên dùng trường "season_year_str" đã được map
+            season_year_string = flat_data.get('season_year_str') # Ví dụ: "2023/2024"
+            if season_year_string and '/' in season_year_string:
+                # Logic chuẩn khi có "2023/2024"
+                start_year_str = season_year_string.split('/')[0]
+                start_year = int(start_year_str)
+            else:
+                # Fallback: Dùng regex để tìm một số có 4 chữ số (năm) trong tên mùa giải
+                import re
+                logger.warning(f"Using fallback for season year. Raw season name: {flat_data.get('season_name')}")
+                # Tìm một số có 4 chữ số, ví dụ 2023, 2024...
+                match = re.search(r'\b(20\d{2})\b', flat_data.get('season_name', ''))
+                if match:
+                    start_year = int(match.group(1))
+                else:
+                    # Nếu không tìm thấy năm, báo lỗi
+                    raise ValueError(f"Cannot determine season year from data: {flat_data}")
 
-            season_name = flat_data.get('season_name') # "2023/2024"
-            if not season_name:
-                raise ValueError("Season name is missing.")
-                
-            start_year_str = season_name.split('/')[0]
-            start_year = int(start_year_str)
             end_year = start_year + 1
 
             parsed_season = ParsedSeason(

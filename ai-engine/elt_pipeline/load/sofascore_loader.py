@@ -72,7 +72,7 @@ class SofaScoreLoader:
         
         try:
             # Test connection
-            self.session.execute("SELECT 1")
+            self.session.execute(text("SELECT 1"))
         except Exception as e:
             logger.error(f"Database session validation failed: {e}")
             raise
@@ -127,7 +127,7 @@ class SofaScoreLoader:
             query = self._build_upsert_query(table_config)
             params = {"name": name.strip()}
             
-            result = self.session.execute(query, params)
+            result = self.session.execute(text(query), params)
             internal_id = result.scalar_one_or_none()
             
             if internal_id:
@@ -140,28 +140,28 @@ class SofaScoreLoader:
                 logger.debug(f"Successfully upserted {entity_type}", extra={
                     "external_id": external_id, 
                     "internal_id": internal_id, 
-                    "name": name
+                    "entity_name": name
                 })
                 return internal_id
             else:
                 logger.error(f"Upsert returned no ID for {entity_type}", extra={
-                    "external_id": external_id, "name": name
+                    "external_id": external_id, "entity_name": name
                 })
                 return None
                     
         except IntegrityError as e:
             logger.error(f"Integrity error upserting {entity_type}", extra={
-                "external_id": external_id, "name": name, "error": str(e)
+                "external_id": external_id, "entity_name": name, "error": str(e)
             })
             raise  # Let the orchestrator handle transaction rollback
         except SQLAlchemyError as e:
             logger.error(f"Database error upserting {entity_type}", extra={
-                "external_id": external_id, "name": name, "error": str(e)
+                "external_id": external_id, "entity_name": name, "error": str(e)
             })
             raise
         except Exception as e:
             logger.error(f"Unexpected error upserting {entity_type}", extra={
-                "external_id": external_id, "name": name, "error": str(e)
+                "external_id": external_id, "entity_name": name, "error": str(e)
             }, exc_info=True)
             raise
 
@@ -253,7 +253,7 @@ class SofaScoreLoader:
                 "capacity": stadium.capacity
             }
             
-            result = self.session.execute(query, params)
+            result = self.session.execute(text(query), params)
             stadium.internal_id = result.scalar_one_or_none()
             
             if stadium.internal_id:
@@ -340,6 +340,7 @@ class SofaScoreLoader:
                 "round": str(match.round) if match.round else None,
                 "st_id": match.stadium.internal_id if match.stadium else None,
                 "ref_id": match.referee.internal_id if match.referee else None,
+                "outcome": match.outcome if match.status == 'FINISHED' else None
             }
             
             result = self.session.execute(query, params)

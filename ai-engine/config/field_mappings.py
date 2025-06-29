@@ -320,6 +320,7 @@ SOFASCORE_FIELD_MAPPING = {
     "tournament.category.name": "league_country",
     "season.id": "season_id",
     "season.name": "season_name",
+    "season.year": "season_year_str",
     # Team
     "homeTeam.id": "home_team_id",
     "homeTeam.name": "home_team_name",

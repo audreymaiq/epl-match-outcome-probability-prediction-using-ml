@@ -1,0 +1,43 @@
+{
+  "external_id": 12436536,
+  "season": {
+    "name": "24/25",
+    "start_year": 24,
+    "end_year": 25,
+    "league": {
+      "name": "Premier League",
+      "country": "England",
+      "internal_id": null
+    },
+    "internal_id": null
+  },
+  "match_datetime": "2025-05-25 17:15:00+00:00",
+  "round": null,
+  "home_team": {
+    "external_id": 60,
+    "name": "Bournemouth",
+    "internal_id": null
+  },
+  "away_team": {
+    "external_id": 31,
+    "name": "Leicester",
+    "internal_id": null
+  },
+  "status": "FINISHED",
+  "outcome": "H",
+  "home_goals": 2,
+  "away_goals": 1,
+  "ht_home_goals": 0,
+  "ht_away_goals": 1,
+  "stadium": {
+    "name": "Vitality Stadium",
+    "city": "Bournemouth",
+    "capacity": 11700,
+    "internal_id": null
+  },
+  "referee": null,
+  "importance": "LOW",
+  "status_label": 2,
+  "outcome_label": 0,
+  "internal_id": null
+}
