@@ -103,6 +103,10 @@ class SofaScoreExtractor:
         """Wrapper để lấy thống kê."""
         return self._make_request(SofaScoreEndpoints.MATCH_STATISTICS, match_id=match_id)
 
+    def fetch_paginated_events(self, endpoint: SofaScoreEndpoints, **kwargs) -> List[Dict]:
+        """Alias for fetch_paginated_data to match orchestrator expectations."""
+        return self.fetch_paginated_data(endpoint, **kwargs)
+
     def close(self):
         """Đóng session khi hoàn tất."""
         self.session.close()

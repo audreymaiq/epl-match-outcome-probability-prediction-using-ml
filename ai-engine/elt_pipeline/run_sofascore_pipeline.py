@@ -41,7 +41,7 @@ class SofaScoreETLOrchestrator:
         season_success = True
         
         # --- EXTRACT (Summaries) ---
-        raw_summaries = self.extractor.fetch_paginated_events(
+        raw_summaries = self.extractor.fetch_paginated_data(
             SofaScoreEndpoints.SEASON_MATCHES,
             tournament_id=tournament_id,
             season_id=season_id
@@ -87,7 +87,7 @@ class SofaScoreETLOrchestrator:
 
             except Exception as e:
                 logger.error("An unexpected error occurred while processing a match.",
-                             extra=log_extra, exc_info=True)
+                            extra=log_extra, exc_info=True)
                 season_success = False
         
         logger.info(f"--- Finished ETL process for season: {season_name} ---")

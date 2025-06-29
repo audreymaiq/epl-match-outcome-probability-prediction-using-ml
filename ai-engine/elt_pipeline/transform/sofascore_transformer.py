@@ -9,8 +9,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, date
 from typing import Dict, Any, Optional
 
-from requests import Session
-
 from utils.db_connector import DatabaseConnector
 from utils.external_mapping import get_internal_id, upsert_mapping
 from utils.logging_config import setup_logging
@@ -133,5 +131,28 @@ class SofaScoreTransformer:
             match.stadium = stadium
         if referee:
             match.referee = referee
+            
+        return match
+
+    def transform_match_data(self, raw_summary: Dict, raw_detail: Dict) -> Optional[ParsedMatch]:
+        """
+        Combine summary and detail data into a complete ParsedMatch object.
+        
+        Args:
+            raw_summary: Match summary data from list endpoint
+            raw_detail: Detailed match data from detail endpoint
+            
+        Returns:
+            Complete ParsedMatch object with all available data
+        """
+        # Parse the basic match data from summary
+        match = self.parse_match_list_item(raw_summary)
+        
+        if not match:
+            return None
+            
+        # Enrich with detailed data if available
+        if raw_detail:
+            match = self.enrich_match_with_details(match, raw_detail)
             
         return match
