@@ -137,7 +137,7 @@ def _get_config():
         ImportError: Nếu không thể import config
     """
     try:
-        from ...config.settings import get_config
+        from config.settings import get_config
         return get_config()
     except ImportError as e:
         logging.error(f"Cannot import config: {e}")

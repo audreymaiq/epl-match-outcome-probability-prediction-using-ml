@@ -432,6 +432,9 @@ class ScrapingSettings(BaseSettings):
     enable_metrics: bool = Field(default=True, env="SCRAPING_ENABLE_METRICS")
     log_failed_requests: bool = Field(default=True, env="SCRAPING_LOG_FAILURES")
     save_failed_responses: bool = Field(default=False, env="SCRAPING_SAVE_FAILURES")
+    
+    # Giả lập trình duyệt
+    browser_impersonate: str = Field(default="chrome110", env="SCRAPING_BROWSER_IMPERSONATE")
 
     @field_validator("proxy_urls", mode="before")
     @classmethod

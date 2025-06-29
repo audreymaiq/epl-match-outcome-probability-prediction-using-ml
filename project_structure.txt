@@ -1,6 +1,8 @@
 ai-engine/
     .env
+    .env.sample
     .gitignore
+    main.py
     requirements.txt
     config/
         business_constants.py
@@ -19,15 +21,28 @@ ai-engine/
             init-db.sql
             init-raw.sql
     elt_pipeline/
+        run_sofascore_pipeline.py
+        __init__.py
         extract/
-            api_endpoints.py
-            api_football_client.py
+            api_football_endpoints.py
+            api_football_extractor.py
+            sofascore_endpoints.py
+            sofascore_extractor.py
+            __init__.py
         load/
+            sofascore_loader.py
+            __init__.py
         transform/
+            data_structures.py
+            sofascore_transformer.py
+            __init__.py
     modeling/
     scripts/
+        test_fetch.py
+        test_settings_db_connector.py
     utils/
         db_connector.py
+        dict_helpers.py
         external_mapping.py
         logging_config.py
         __init__.py
