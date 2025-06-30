@@ -23,7 +23,7 @@ from .core_constants import (
     get_match_outcome,
     get_player_availability,
     # Constants
-    PlayerAvailabilityStatus,
+    PlayerStatus,
     PlayerPosition,
     MatchStatus,
     MatchOutcome,
@@ -70,13 +70,13 @@ def unified_player_availability_mapper(status: Optional[str], api_type: str = "s
 position_mapper = safe_mapping(API_FOOTBALL_POSITION_MAPPING, default=PlayerPosition.UNKNOWN)
 status_mapper = safe_mapping(API_FOOTBALL_STATUS_MAPPING, default=MatchStatus.UNKNOWN)
 outcome_mapper = safe_mapping(API_FOOTBALL_OUTCOME_MAPPING, default=MatchOutcome.UNKNOWN)
-player_status_mapper = safe_mapping(API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING, default=PlayerAvailabilityStatus.UNKNOWN)
+player_status_mapper = safe_mapping(API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING, default=PlayerStatus.UNKNOWN)
 
 # SofaScore specific mappers
 sofascore_position_mapper = safe_mapping(SOFASCORE_POSITION_MAPPING, default=PlayerPosition.UNKNOWN)
 sofascore_status_mapper = safe_mapping(SOFASCORE_STATUS_MAPPING, default=MatchStatus.UNKNOWN)
 sofascore_outcome_mapper = safe_mapping(SOFASCORE_OUTCOME_MAPPING, default=MatchOutcome.UNKNOWN)
-sofascore_player_status_mapper = safe_mapping(SOFASCORE_PLAYER_AVAILABILITY_MAPPING, default=PlayerAvailabilityStatus.UNKNOWN)
+sofascore_player_status_mapper = safe_mapping(SOFASCORE_PLAYER_AVAILABILITY_MAPPING, default=PlayerStatus.UNKNOWN)
 
 # =============================================================================
 # EVENT TYPE MAPPINGS - Enhanced for both APIs
@@ -91,8 +91,8 @@ API_FOOTBALL_EVENT_MAPPING = {
     "Penalty": "penalty_goal",
     "Missed Penalty": "missed_penalty",
     # Cards
-    "Yellow Card": "yellow_card",
-    "Red Card": "red_card",
+    "Yellow Card": "yellow card",
+    "Red Card": "red card",
     # Substitution
     "Subst": "substitution",
     # VAR
@@ -109,9 +109,9 @@ SOFASCORE_EVENT_MAPPING = {
     "penalty": "penalty_goal",
     "penaltyMissed": "missed_penalty",
     # Cards
-    "yellowCard": "yellow_card",
-    "redCard": "red_card",
-    "secondYellow": "red_card",
+    "yellowCard": "yellow card",
+    "redCard": "red card",
+    "secondYellow": "red card",
     # Substitution
     "substitution": "substitution",
     # VAR
@@ -128,15 +128,15 @@ SOFASCORE_EVENT_MAPPING = {
 def unified_event_type_mapper(event_type: Optional[str], api_type: str = "sofascore") -> str:
     """Unified event type mapper"""
     if not event_type:
-        return "unknown"
+        return None
     
     if api_type == "sofascore":
-        return SOFASCORE_EVENT_MAPPING.get(event_type, "unknown")
+        return SOFASCORE_EVENT_MAPPING.get(event_type)
     else:  # api_football
-        return API_FOOTBALL_EVENT_MAPPING.get(event_type, "unknown")
+        return API_FOOTBALL_EVENT_MAPPING.get(event_type)
 
 # Legacy mapper for backward compatibility
-event_type_mapper = safe_mapping(API_FOOTBALL_EVENT_MAPPING, default="unknown")
+event_type_mapper = safe_mapping(API_FOOTBALL_EVENT_MAPPING, default=None)
 
 # =============================================================================
 # PERIOD MAPPINGS - Enhanced for both APIs
@@ -144,50 +144,46 @@ event_type_mapper = safe_mapping(API_FOOTBALL_EVENT_MAPPING, default="unknown")
 
 # API-Football period mapping
 API_FOOTBALL_PERIOD_MAPPING = {
-    "1H": "first_half",
-    "2H": "second_half",
-    "HT": "halftime",
-    "ET": "extra_time",
-    "P": "penalty_shootout",
-    "BT": "break_time"
+    "1H": "1H",
+    "2H": "2H",
+    "ET": "ET1", 
+    "P": "PEN"
 }
 
 # SofaScore period mapping
 SOFASCORE_PERIOD_MAPPING = {
-    "1": "first_half",
-    "2": "second_half",
-    "3": "extra_time_first",
-    "4": "extra_time_second",
-    "5": "penalty_shootout",
-    "halftime": "halftime",
-    "pause": "break_time"
+    "1": "1H",
+    "2": "2H",
+    "3": "ET1", 
+    "4": "ET2", 
+    "5": "PEN"
 }
 
 def unified_period_mapper(period: Optional[Union[str, int]], api_type: str = "sofascore") -> str:
     """Unified period mapper"""
     if period is None:
-        return "unknown"
+        return None
     
     period_str = str(period)
     if api_type == "sofascore":
-        return SOFASCORE_PERIOD_MAPPING.get(period_str, "unknown")
+        return SOFASCORE_PERIOD_MAPPING.get(period_str)
     else:  # api_football
-        return API_FOOTBALL_PERIOD_MAPPING.get(period_str, "unknown")
+        return API_FOOTBALL_PERIOD_MAPPING.get(period_str)
 
 # Legacy mapper
-period_mapper = safe_mapping(API_FOOTBALL_PERIOD_MAPPING, default="unknown")
+period_mapper = safe_mapping(API_FOOTBALL_PERIOD_MAPPING, default=None)
 
 # =============================================================================
 # LOCATION MAPPINGS
 # =============================================================================
 
 LOCATION_MAPPING = {
-    "home": "home",
-    "away": "away",
-    "total": "overall",
-    "overall": "overall"
+    "home": "Home",
+    "away": "Away",
+    "total": "Overall",
+    "overall": "Overall"
 }
-location_mapper = safe_mapping(LOCATION_MAPPING, default="overall")
+location_mapper = safe_mapping(LOCATION_MAPPING, default="Overall")
 
 # =============================================================================
 # CARD MAPPINGS
@@ -291,9 +287,9 @@ API_FOOTBALL_FIELD_MAPPING = {
     "games.minutes": "minutes_played",
     "goals.total": "goals",
     "goals.assists": "assists",
-    "shots.total": "shots_total",
-    "shots.on": "shots_on",
-    "passes.total": "passes_total",
+    "shots.total": "shots",
+    "shots.on": "shots_on_target",
+    "passes.total": "passes",
     "passes.accuracy": "passes_accuracy",
     "tackles.total": "tackles",
     "duels.won": "duels_won",
@@ -346,10 +342,10 @@ SOFASCORE_FIELD_MAPPING = {
     "statistics.goals": "goals",
     "statistics.assists": "assists",
     "statistics.minutesPlayed": "minutes_played",
-    "statistics.totalShots": "shots_total",
-    "statistics.shotsOnTarget": "shots_on",
-    "statistics.totalPasses": "passes_total",
-    "statistics.accuratePasses": "passes_accurate",
+    "statistics.totalShots": "shots",
+    "statistics.shotsOnTarget": "shots_on_target",
+    "statistics.totalPasses": "passes",
+    "statistics.accuratePasses": "accurate_passes",
     "statistics.passAccuracy": "passes_accuracy",
     "statistics.tackles": "tackles",
     "statistics.duelsWon": "duels_won",
@@ -529,11 +525,10 @@ DEFAULT_PLAYER_STATS = {
     "minutes_played": 0,
     "goals": 0,
     "assists": 0,
-    "shots_total": 0,
-    "shots_on": 0,
-    "passes_total": 0,
-    "passes_accurate": 0,
-    "passes_accuracy": 0.0,
+    "shots": 0,
+    "shots_on_target": 0,
+    "passes": 0,
+    "accurate_passes": 0,
     "tackles": 0,
     "duels_won": 0,
     "fouls_committed": 0,
@@ -568,41 +563,6 @@ DEFAULT_VALUES = DEFAULT_PLAYER_STATS
 def get_default_value(field_name: str, api_type: str = "sofascore") -> Any:
     """Get default value for a field"""
     return DEFAULT_PLAYER_STATS.get(field_name, None)
-
-def normalize_team_name(name: str) -> str:
-    """Normalize team name for consistency"""
-    if not name:
-        return ""
-    
-    # Common team name normalizations
-    normalizations = {
-        "Manchester United": "Manchester Utd",
-        "Manchester City": "Manchester City",
-        "Tottenham Hotspur": "Tottenham",
-        "Newcastle United": "Newcastle",
-        "West Ham United": "West Ham",
-        "Brighton & Hove Albion": "Brighton",
-        "Wolverhampton Wanderers": "Wolves"
-    }
-    
-    return normalizations.get(name, name)
-
-def extract_season_from_name(season_name: str) -> Optional[int]:
-    """Extract start year from season name (e.g., '2023/24' -> 2023)"""
-    if not season_name:
-        return None
-    
-    try:
-        # Handle formats like "2023/24", "2023-24", "2023/2024"
-        if '/' in season_name:
-            return int(season_name.split('/')[0])
-        elif '-' in season_name:
-            return int(season_name.split('-')[0])
-        else:
-            # Try to parse as year directly
-            return int(season_name)
-    except (ValueError, IndexError):
-        return None
 
 def build_sofascore_url(endpoint: str, **params) -> str:
     """Build SofaScore API URL with parameters"""

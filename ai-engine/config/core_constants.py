@@ -9,9 +9,32 @@ class MatchStatus:
     POSTPONED = "POSTPONED"
     CANCELLED = "CANCELLED"
     ABANDONED = "ABANDONED"
-    UNKNOWN = "UNKNOWN"
+    UNKNOWN = "Unknown"
+class PlayerPosition:
+    GK = "GK"
+    DEF = "DEF"
+    MID = "MID"
+    FWD = "FWD"
+    UNKNOWN = "Unknown"
 
-# SofaScore status mapping (khác với API-Football)
+class MatchOutcome:
+    HOME = "H"
+    DRAW = "D"
+    AWAY = "A"
+    UNKNOWN = "Unknown"
+
+class PlayerStatus:
+    AVAILABLE = "Available"
+    AWAY_ON_INTL_DUTY = "Away on Intl Duty"
+    MISSING_FIXTURE = "Missing Fixture"
+    QUESTIONABLE = "Questionable"
+    INJURED = "Injured"
+    SUSPENDED = "Suspended"
+    UNKNOWN = "Unknown"
+
+# --- Dictionaries Mapping từ API về hằng số chuẩn hóa ---
+
+# SofaScore status mapping 
 SOFASCORE_STATUS_MAPPING = {
     # Scheduled statuses
     "notstarted": MatchStatus.SCHEDULED,
@@ -48,7 +71,6 @@ SOFASCORE_STATUS_MAPPING = {
 }
 
 # Legacy API-Football mapping (kept for reference/migration)
-# Keys normalized to uppercase for consistency
 API_FOOTBALL_STATUS_MAPPING = {
     # Scheduled statuses
     "TBD": MatchStatus.SCHEDULED,   # Time To Be Defined
@@ -82,21 +104,12 @@ API_FOOTBALL_STATUS_MAPPING = {
     "ABD": MatchStatus.ABANDONED    # Abandoned
 }
 
-class PlayerPosition:
-    GK = "GK"
-    DEF = "DEF"
-    MID = "MID"
-    FWD = "FWD"
-    UNKNOWN = "UNKNOWN"
-
 # SofaScore position mapping - keys normalized to lowercase
 SOFASCORE_POSITION_MAPPING = {
-    "g": PlayerPosition.GK,      # Goalkeeper
-    "d": PlayerPosition.DEF,     # Defender
-    "m": PlayerPosition.MID,     # Midfielder
-    "f": PlayerPosition.FWD,     # Forward
-    
-    # Full names từ SofaScore - normalized to lowercase
+    "g": PlayerPosition.GK,
+    "d": PlayerPosition.DEF,
+    "m": PlayerPosition.MID,
+    "f": PlayerPosition.FWD,
     "goalkeeper": PlayerPosition.GK,
     "defender": PlayerPosition.DEF,
     "midfielder": PlayerPosition.MID,
@@ -112,26 +125,11 @@ API_FOOTBALL_POSITION_MAPPING = {
     "attacker": PlayerPosition.FWD
 }
 
-class MatchOutcome:
-    HOME = "H"
-    DRAW = "D"
-    AWAY = "A"
-    UNKNOWN = "UNKNOWN"
-
-class SofascoreWinnerCodes:
-    """SofaScore winner code constants"""
-    HOME_WIN = 1
-    AWAY_WIN = 2
-    DRAW = 3
-
 # SofaScore outcome mapping - keys normalized to string
 SOFASCORE_OUTCOME_MAPPING = {
-    # Numeric codes as strings
-    "1": MatchOutcome.HOME,    # Home team wins
-    "2": MatchOutcome.AWAY,    # Away team wins
-    "3": MatchOutcome.DRAW,    # Draw
-    
-    # Text-based (backup)
+    "1": MatchOutcome.HOME,
+    "2": MatchOutcome.AWAY,
+    "0": MatchOutcome.DRAW,
     "home": MatchOutcome.HOME,
     "away": MatchOutcome.AWAY,
     "draw": MatchOutcome.DRAW
@@ -144,27 +142,91 @@ API_FOOTBALL_OUTCOME_MAPPING = {
     "away": MatchOutcome.AWAY
 }
 
-class PlayerAvailabilityStatus:
-    MISSING = "Missing Fixture"
-    QUESTIONABLE = "Questionable"
-    INJURED = "Injured"
-    SUSPENDED = "Suspended"
-    UNKNOWN = "Unknown"
-
 # SofaScore player availability mapping
 SOFASCORE_PLAYER_AVAILABILITY_MAPPING = {
-    "missing": PlayerAvailabilityStatus.MISSING,
-    "questionable": PlayerAvailabilityStatus.QUESTIONABLE,
-    "injured": PlayerAvailabilityStatus.INJURED,
-    "suspended": PlayerAvailabilityStatus.SUSPENDED,
-    "doubt": PlayerAvailabilityStatus.QUESTIONABLE
+    "missing": PlayerStatus.MISSING_FIXTURE,
+    "questionable": PlayerStatus.QUESTIONABLE,
+    "injured": PlayerStatus.INJURED,
+    "suspended": PlayerStatus.SUSPENDED,
+    "doubt": PlayerStatus.QUESTIONABLE
 }
 
 # Legacy API-Football player availability mapping
 API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING = {
-    "missing fixture": PlayerAvailabilityStatus.MISSING,
-    "questionable": PlayerAvailabilityStatus.QUESTIONABLE
+    "missing fixture": PlayerStatus.MISSING_FIXTURE,
+    "questionable": PlayerStatus.QUESTIONABLE
 }
+
+# --- Các hàm Mapping thống nhất - Trả về giá trị chuẩn hóa hoặc None ---
+
+# Unified mapping functions for easy switching between APIs
+def get_match_status(api_status: Optional[str], api_type: str = "sofascore") -> Optional[str]:
+    """
+    Nhận trạng thái từ API và trả về trạng thái chuẩn hóa hoặc None nếu không xác định.
+    """
+    if not isinstance(api_status, str) or not api_status.strip():
+        return None
+
+    if api_type == "sofascore":
+        return SOFASCORE_STATUS_MAPPING.get(api_status.lower())
+    elif api_type == "api_football":
+        return API_FOOTBALL_STATUS_MAPPING.get(api_status.upper())
+    
+    return None
+
+def get_player_position(api_position: Optional[str], api_type: str = "sofascore") -> Optional[str]:
+    """
+    Nhận vị trí từ API và trả về vị trí chuẩn hóa hoặc None nếu không xác định.
+    """
+    if not isinstance(api_position, str) or not api_position.strip():
+        return None
+
+    normalized_pos = api_position.lower()
+    if api_type == "sofascore":
+        return SOFASCORE_POSITION_MAPPING.get(normalized_pos)
+    elif api_type == "api_football":
+        return API_FOOTBALL_POSITION_MAPPING.get(normalized_pos)
+    
+    return None
+
+def get_match_outcome(api_outcome: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[str]:
+    """
+    Nhận kết quả từ API và trả về kết quả chuẩn hóa hoặc None nếu không xác định.
+    """
+    if api_outcome is None:
+        return None
+        
+    normalized_outcome = str(api_outcome).lower()
+    
+    if api_type == "sofascore":
+        return SOFASCORE_OUTCOME_MAPPING.get(normalized_outcome)
+    elif api_type == "api_football":
+        return API_FOOTBALL_OUTCOME_MAPPING.get(normalized_outcome)
+
+    return None
+        
+def get_player_availability(api_status: Optional[str], api_type: str = "sofascore") -> Optional[str]:
+    """
+    Nhận trạng thái sẵn sàng của cầu thủ từ API và trả về trạng thái chuẩn hóa hoặc None.
+    """
+    if not isinstance(api_status, str) or not api_status.strip():
+        return None
+        
+    normalized_status = api_status.lower()
+    
+    if api_type == "sofascore":
+        return SOFASCORE_PLAYER_AVAILABILITY_MAPPING.get(normalized_status)
+    elif api_type == "api_football":
+        return API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING.get(normalized_status)
+    
+    return None
+
+# --- Các hằng số khác không liên quan trực tiếp đến schema ENUMs ---
+class SofascoreWinnerCodes:
+    """SofaScore winner code constants"""
+    HOME_WIN = 1
+    AWAY_WIN = 2
+    DRAW = 0
 
 # SofaScore specific constants
 class SofascoreConstants:
@@ -205,96 +267,6 @@ class SofascoreConstants:
         "passes": "Total passes",
         "pass_accuracy": "Pass accuracy"
     }
-
-# Unified mapping functions for easy switching between APIs
-def get_match_status(api_status: Optional[str], api_type: str = "sofascore") -> str:
-    """
-    Get unified match status from API-specific status
-    
-    Args:
-        api_status: Status from API
-        api_type: "sofascore" or "api_football"
-    
-    Returns:
-        Unified MatchStatus
-    """
-    if not isinstance(api_status, str):
-        return MatchStatus.UNKNOWN
-        
-    if api_type == "sofascore":
-        return SOFASCORE_STATUS_MAPPING.get(api_status.lower(), MatchStatus.UNKNOWN)
-    elif api_type == "api_football":
-        return API_FOOTBALL_STATUS_MAPPING.get(api_status.upper(), MatchStatus.UNKNOWN)
-    else:
-        return MatchStatus.UNKNOWN
-
-def get_player_position(api_position: Optional[str], api_type: str = "sofascore") -> str:
-    """
-    Get unified player position from API-specific position
-    
-    Args:
-        api_position: Position from API
-        api_type: "sofascore" or "api_football"
-    
-    Returns:
-        Unified PlayerPosition
-    """
-    if not isinstance(api_position, str):
-        return PlayerPosition.UNKNOWN
-        
-    if api_type == "sofascore":
-        return SOFASCORE_POSITION_MAPPING.get(api_position.lower(), PlayerPosition.UNKNOWN)
-    elif api_type == "api_football":
-        return API_FOOTBALL_POSITION_MAPPING.get(api_position.lower(), PlayerPosition.UNKNOWN)
-    else:
-        return PlayerPosition.UNKNOWN
-
-def get_match_outcome(api_outcome: Optional[Union[int, str]], api_type: str = "sofascore") -> str:
-    """
-    Get unified match outcome from API-specific outcome
-    
-    Args:
-        api_outcome: Outcome from API (can be int, str)
-        api_type: "sofascore" or "api_football"
-    
-    Returns:
-        Unified MatchOutcome
-    """
-    if api_outcome is None:
-        return MatchOutcome.UNKNOWN
-        
-    # Normalize input to string and lowercase
-    normalized_outcome = str(api_outcome).lower()
-    
-    if api_type == "sofascore":
-        return SOFASCORE_OUTCOME_MAPPING.get(normalized_outcome, MatchOutcome.UNKNOWN)
-    elif api_type == "api_football":
-        return API_FOOTBALL_OUTCOME_MAPPING.get(normalized_outcome, MatchOutcome.UNKNOWN)
-    else:
-        return MatchOutcome.UNKNOWN
-
-def get_player_availability(api_status: Optional[str], api_type: str = "sofascore") -> str:
-    """
-    Get unified player availability status from API-specific status
-    
-    Args:
-        api_status: Availability status from API
-        api_type: "sofascore" or "api_football"
-    
-    Returns:
-        Unified PlayerAvailabilityStatus
-    """
-    if not isinstance(api_status, str):
-        return PlayerAvailabilityStatus.UNKNOWN
-        
-    normalized_status = api_status.lower()
-    
-    if api_type == "sofascore":
-        return SOFASCORE_PLAYER_AVAILABILITY_MAPPING.get(normalized_status, PlayerAvailabilityStatus.UNKNOWN)
-    elif api_type == "api_football":
-        return API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING.get(normalized_status, PlayerAvailabilityStatus.UNKNOWN)
-    else:
-        return PlayerAvailabilityStatus.UNKNOWN
 
 # Legacy support - keep for backward compatibility
 class BetType:

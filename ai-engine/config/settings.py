@@ -1,7 +1,6 @@
 # ai-engine\config\settings.py
 
-from pydantic import Field, AnyUrl, ValidationError
-from pydantic import field_validator
+from pydantic import Field, AnyUrl, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
@@ -13,7 +12,9 @@ import random
 from datetime import datetime
 
 ENV_FILE_PATH = (Path(__file__).parent.parent / ".env").resolve()
-
+if not ENV_FILE_PATH.exists():
+    logging.warning(f".env file not found at {ENV_FILE_PATH}. Using default values or environment variables.")
+    
 class DatabaseSettings(BaseSettings):
     """Cấu hình database với validation an toàn"""
     model_config = SettingsConfigDict(
@@ -63,7 +64,7 @@ class APIFootballSettings(BaseSettings):
     )
     
     base_url: AnyUrl = Field(
-        default="https://v3.football.api-sports.io", 
+        default="https://v3.football.api-sports.io",
         env="API_FOOTBALL_BASE_URL"
     )
     api_keys: List[str] = Field(
@@ -152,7 +153,7 @@ class SofascoreSettings(BaseSettings):
     
     # Base URLs cho các endpoints khác nhau
     base_url: AnyUrl = Field(
-        default="https://api.sofascore.com/api/v1", 
+        default="https://api.sofascore.com/api/v1",
         env="SOFASCORE_BASE_URL"
     )
     

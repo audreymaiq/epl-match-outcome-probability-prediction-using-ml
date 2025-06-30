@@ -1,4 +1,4 @@
-# elt_pipeline\load\sofascore_loader.py
+# elt_pipeline/load/sofascore_loader.py
 
 """
 SofaScore ETL Pipeline: Loader - Ghi các đối tượng đã chuẩn hóa vào database.
@@ -6,55 +6,50 @@ SofaScore ETL Pipeline: Loader - Ghi các đối tượng đã chuẩn hóa vào
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import text
 
-from utils.db_connector import DatabaseConnector
-from utils.external_mapping import get_internal_id, upsert_mapping
-from elt_pipeline.transform.sofascore_transformer import (
-    ParsedTeam, ParsedStadium, ParsedReferee, ParsedMatch
-)
-
 from elt_pipeline.transform.data_structures import (
-    ParsedTeam, ParsedStadium, ParsedReferee, ParsedMatch, ParsedLeague, ParsedSeason
+    ParsedMatch, ParsedTeam, ParsedStadium, ParsedReferee, ParsedLeague, ParsedSeason, ParsedPlayer, ParsedMatchEvent
 )
+from utils.external_mapping import get_internal_id, upsert_mapping
 
 logger = logging.getLogger(__name__)
 
 # --- CONSTANTS ---
 ALLOWED_TABLES = {
-    "Teams": {
-        "table": "Teams",
-        "columns": ["name"],
-        "conflict_columns": ["name"]
-    },
-    "Referees": {
-        "table": "Referees", 
-        "columns": ["name"],
-        "conflict_columns": ["name"]
-    },
-    "Players": {
-        "table": "Players",
-        "columns": ["name"], 
-        "conflict_columns": ["name"]
-    },
-    "Stadiums": {
-        "table": "Stadiums",
-        "columns": ["name", "city", "capacity"],
-        "conflict_columns": ["name"]
-    },
     "Leagues": {
         "table": "Leagues",
-        "columns": ["name", "country"],
+        "columns": ["name", "country", "established_year"],
         "conflict_columns": ["name"]
     },
     "Seasons": {
         "table": "Seasons",
         "columns": ["league_id", "start_year", "end_year", "name"],
-        "conflict_columns": ["name"] # Giả sử tên mùa giải là duy nhất
-    }
+        "conflict_columns": ["league_id", "name"]
+    },
+    "Stadiums": {
+        "table": "Stadiums",
+        "columns": ["name", "city", "capacity", "timezone"],
+        "conflict_columns": ["name"]
+    },
+    "Teams": {
+        "table": "Teams",
+        "columns": ["name", "short_name", "stadium_id", "established_year", "logo_url"],
+        "conflict_columns": ["name"]
+    },
+    "Referees": {
+        "table": "Referees",
+        "columns": ["name", "date_of_birth", "country"],
+        "conflict_columns": ["name", "date_of_birth"]
+    },
+    "Players": {
+        "table": "Players",
+        "columns": ["name", "position", "date_of_birth", "nationality", "height"],
+        "conflict_columns": ["name", "date_of_birth"]
+    },
 }
 
 # --- LỚP LOADER: CHỈ GHI VÀO DATABASE ---
@@ -69,9 +64,7 @@ class SofaScoreLoader:
         """Validate database session."""
         if not self.session:
             raise ValueError("Database session is required")
-        
         try:
-            # Test connection
             self.session.execute(text("SELECT 1"))
         except Exception as e:
             logger.error(f"Database session validation failed: {e}")
@@ -87,98 +80,40 @@ class SofaScoreLoader:
         columns = table_config["columns"]
         conflict_columns = table_config["conflict_columns"]
         
-        # Build column placeholders
+        column_str = ", ".join([f'"{col}"' for col in columns])
         column_placeholders = ", ".join([f":{col}" for col in columns])
-        update_sets = ", ".join([f"{col} = EXCLUDED.{col}" for col in columns])
-        conflict_cols = ", ".join(conflict_columns)
+        # Lọc ra các cột không phải là một phần của khóa xung đột để cập nhật
+        update_columns = [col for col in columns if col not in conflict_columns]
+        update_sets = ", ".join([f'"{col}" = EXCLUDED."{col}"' for col in update_columns])
+        conflict_cols = ", ".join([f'"{col}"' for col in conflict_columns])
         
+        # Chỉ thực hiện UPDATE nếu có cột cần cập nhật
+        do_update_clause = f"DO UPDATE SET {update_sets}" if update_sets else "DO NOTHING"
+
         query = f'''
-            INSERT INTO "{table_name}" ({", ".join(columns)}) 
+            INSERT INTO "{table_name}" ({column_str}) 
             VALUES ({column_placeholders})
             ON CONFLICT ({conflict_cols}) 
-            DO UPDATE SET {update_sets}
+            {do_update_clause}
             RETURNING id;
         '''
-        
         return query
-
-    def _upsert_and_map(self, entity_type: str, external_id: int, name: str, table_name: str) -> Optional[int]:
-        """
-        Hàm chung để upsert Team/Referee/Player và tạo mapping.
-        """
-        try:
-            # Get table configuration
-            table_config = self._get_table_config(table_name)
-            if not table_config:
-                logger.error(f"Invalid table name for _upsert_and_map: {table_name}")
-                return None
-
-            # Kiểm tra mapping hiện tại
-            internal_id = get_internal_id(
-                str(external_id), entity_type, "sofascore", session=self.session
-            )
-            if internal_id:
-                logger.debug(f"{entity_type} mapping already exists", extra={
-                    "external_id": external_id, "internal_id": internal_id
-                })
-                return internal_id
-
-            # Build và execute safe query
-            query = self._build_upsert_query(table_config)
-            params = {"name": name.strip()}
-            
-            result = self.session.execute(text(query), params)
-            internal_id = result.scalar_one_or_none()
-            
-            if internal_id:
-                # Tạo mapping
-                upsert_mapping(
-                    str(external_id), internal_id, entity_type, "sofascore", 
-                    session=self.session
-                )
-                
-                logger.debug(f"Successfully upserted {entity_type}", extra={
-                    "external_id": external_id, 
-                    "internal_id": internal_id, 
-                    "entity_name": name
-                })
-                return internal_id
-            else:
-                logger.error(f"Upsert returned no ID for {entity_type}", extra={
-                    "external_id": external_id, "entity_name": name
-                })
-                return None
-                    
-        except IntegrityError as e:
-            logger.error(f"Integrity error upserting {entity_type}", extra={
-                "external_id": external_id, "entity_name": name, "error": str(e)
-            })
-            raise  # Let the orchestrator handle transaction rollback
-        except SQLAlchemyError as e:
-            logger.error(f"Database error upserting {entity_type}", extra={
-                "external_id": external_id, "entity_name": name, "error": str(e)
-            })
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error upserting {entity_type}", extra={
-                "external_id": external_id, "entity_name": name, "error": str(e)
-            }, exc_info=True)
-            raise
 
     def upsert_league(self, league: ParsedLeague) -> Optional[int]:
         """Upsert một giải đấu và cập nhật internal_id của nó."""
+        if not league: return None
         try:
-            if league.internal_id:
-                return league.internal_id
+            if league.internal_id: return league.internal_id
 
             table_config = self._get_table_config("Leagues")
             query = self._build_upsert_query(table_config)
-            
-            params = {"name": league.name, "country": league.country}
-            
-            result = self.session.execute(text(query), params) # Sử dụng text()
+            params = {
+                "name": league.name, 
+                "country": league.country,
+                "established_year": league.established_year
+            }
+            result = self.session.execute(text(query), params)
             league.internal_id = result.scalar_one_or_none()
-            
             if league.internal_id:
                 logger.debug(f"Upserted League: {league.name} (ID: {league.internal_id})")
             return league.internal_id
@@ -188,28 +123,23 @@ class SofaScoreLoader:
 
     def upsert_season(self, season: ParsedSeason) -> Optional[int]:
         """Upsert một mùa giải và cập nhật internal_id của nó."""
+        if not season: return None
         try:
-            if season.internal_id:
-                return season.internal_id
+            if season.internal_id: return season.internal_id
 
-            # Đảm bảo league đã có internal_id
             league_id = self.upsert_league(season.league)
-            if not league_id:
-                raise ValueError(f"Could not get internal ID for league: {season.league.name}")
+            if not league_id: raise ValueError(f"Could not get ID for league: {season.league.name}")
 
             table_config = self._get_table_config("Seasons")
             query = self._build_upsert_query(table_config)
-            
             params = {
                 "league_id": league_id,
                 "start_year": season.start_year,
                 "end_year": season.end_year,
                 "name": season.name
             }
-            
-            result = self.session.execute(text(query), params) # Sử dụng text()
+            result = self.session.execute(text(query), params)
             season.internal_id = result.scalar_one_or_none()
-            
             if season.internal_id:
                 logger.debug(f"Upserted Season: {season.name} (ID: {season.internal_id})")
             return season.internal_id
@@ -217,85 +147,130 @@ class SofaScoreLoader:
             logger.error(f"Failed to upsert season: {season.name}", exc_info=True)
             raise
 
-    def upsert_team(self, team: ParsedTeam) -> Optional[int]:
-        """Upsert a team and update its internal_id. Assumes team object is valid."""
-        try:
-            if team.internal_id:
-                return team.internal_id
-            
-            team.internal_id = self._upsert_and_map(
-                entity_type="team", 
-                external_id=team.external_id, 
-                name=team.name, 
-                table_name="Teams"
-            )
-            return team.internal_id
-        except Exception as e:
-            logger.error("Failed in upsert_team", extra={"team_external_id": getattr(team, 'external_id', None), "error": str(e)}, exc_info=True)
-            raise
-
     def upsert_stadium(self, stadium: ParsedStadium) -> Optional[int]:
-        """Upsert a stadium and update its internal_id. Assumes stadium object is valid."""
+        """Upsert một sân vận động và cập nhật internal_id của nó."""
+        if not stadium: return None
         try:
-            if stadium.internal_id:
-                return stadium.internal_id
-            
-            table_config = self._get_table_config("Stadiums")
-            if not table_config:
-                logger.error("Stadiums table configuration not found.")
-                return None
+            if stadium.internal_id: return stadium.internal_id
 
+            table_config = self._get_table_config("Stadiums")
             query = self._build_upsert_query(table_config)
-            
             params = {
                 "name": stadium.name.strip(),
                 "city": stadium.city.strip() if stadium.city else None,
-                "capacity": stadium.capacity
+                "capacity": stadium.capacity,
+                "timezone": stadium.timezone
             }
-            
             result = self.session.execute(text(query), params)
             stadium.internal_id = result.scalar_one_or_none()
-            
             if stadium.internal_id:
-                logger.debug("Successfully upserted stadium", extra={"stadium_name": stadium.name, "stadium_id": stadium.internal_id})
-            
+                logger.debug(f"Upserted stadium: {stadium.name} (ID: {stadium.internal_id})")
             return stadium.internal_id
-                
         except Exception:
-            logger.error("Error upserting stadium", extra={"stadium_name": getattr(stadium, 'name', None)}, exc_info=True)
+            logger.error(f"Error upserting stadium: {getattr(stadium, 'name', None)}", exc_info=True)
+            raise
+
+    def upsert_team(self, team: ParsedTeam) -> Optional[int]:
+        """Upsert một đội bóng, ghi đầy đủ dữ liệu, và tạo mapping."""
+        if not team: return None
+        try:
+            if team.internal_id: return team.internal_id
+
+            # Kiểm tra mapping trước
+            internal_id = get_internal_id(str(team.external_id), "team", "sofascore", self.session)
+            if internal_id:
+                team.internal_id = internal_id
+                return internal_id
+
+            # Upsert các thực thể phụ thuộc
+            stadium_id = self.upsert_stadium(team.stadium) if team.stadium else None
+
+            table_config = self._get_table_config("Teams")
+            query = self._build_upsert_query(table_config)
+            params = {
+                "name": team.name,
+                "short_name": team.short_name,
+                "stadium_id": stadium_id,
+                "established_year": team.established_year,
+                "logo_url": team.logo_url
+            }
+            result = self.session.execute(text(query), params)
+            team.internal_id = result.scalar_one_or_none()
+
+            if team.internal_id:
+                upsert_mapping(str(team.external_id), team.internal_id, "team", "sofascore", self.session)
+                logger.debug(f"Upserted Team: {team.name} (ID: {team.internal_id})")
+            return team.internal_id
+        except Exception:
+            logger.error(f"Failed in upsert_team: {getattr(team, 'name', None)}", exc_info=True)
             raise
 
     def upsert_referee(self, referee: ParsedReferee) -> Optional[int]:
-        """Upsert a referee and update its internal_id. Assumes referee object is valid."""
+        """Upsert một trọng tài, ghi đầy đủ dữ liệu, và tạo mapping."""
+        if not referee: return None
         try:
-            if referee.internal_id:
-                return referee.internal_id
+            if referee.internal_id: return referee.internal_id
 
-            referee.internal_id = self._upsert_and_map(
-                entity_type="referee", 
-                external_id=referee.external_id, 
-                name=referee.name, 
-                table_name="Referees"
-            )
+            internal_id = get_internal_id(str(referee.external_id), "referee", "sofascore", self.session)
+            if internal_id:
+                referee.internal_id = internal_id
+                return internal_id
+
+            table_config = self._get_table_config("Referees")
+            query = self._build_upsert_query(table_config)
+            params = {
+                "name": referee.name,
+                "date_of_birth": referee.date_of_birth,
+                "country": referee.country
+            }
+            result = self.session.execute(text(query), params)
+            referee.internal_id = result.scalar_one_or_none()
+
+            if referee.internal_id:
+                upsert_mapping(str(referee.external_id), referee.internal_id, "referee", "sofascore", self.session)
+                logger.debug(f"Upserted Referee: {referee.name} (ID: {referee.internal_id})")
             return referee.internal_id
-        
-        except Exception as e:
-            logger.error("Failed in upsert_referee", extra={"referee_external_id": getattr(referee, 'external_id', None), "error": str(e)}, exc_info=True)
+        except Exception:
+            logger.error(f"Failed in upsert_referee: {getattr(referee, 'name', None)}", exc_info=True)
+            raise
+
+    def upsert_player(self, player: ParsedPlayer) -> Optional[int]:
+        """Upsert một cầu thủ, ghi đầy đủ dữ liệu, và tạo mapping."""
+        if not player: return None
+        try:
+            if player.internal_id: return player.internal_id
+
+            internal_id = get_internal_id(str(player.external_id), "player", "sofascore", self.session)
+            if internal_id:
+                player.internal_id = internal_id
+                return internal_id
+
+            table_config = self._get_table_config("Players")
+            query = self._build_upsert_query(table_config)
+            params = {
+                "name": player.name,
+                "position": player.position,
+                "date_of_birth": player.date_of_birth,
+                "nationality": player.nationality,
+                "height": player.height
+            }
+            result = self.session.execute(text(query), params)
+            player.internal_id = result.scalar_one_or_none()
+
+            if player.internal_id:
+                upsert_mapping(str(player.external_id), player.internal_id, "player", "sofascore", self.session)
+                logger.debug(f"Upserted Player: {player.name} (ID: {player.internal_id})")
+            return player.internal_id
+        except Exception:
+            logger.error(f"Failed in upsert_player: {getattr(player, 'name', None)}", exc_info=True)
             raise
 
     def upsert_match(self, match: ParsedMatch) -> Optional[int]:
-        """
-        Upserts a single match record. 
-        ASSUMES: 
-        1. The match object is validated.
-        2. All related entities (teams, stadium, referee) have their internal_id populated.
-        """
+        """Upserts a single match record."""
         try:
-            # Kiểm tra mapping hiện tại
-            internal_id = get_internal_id(str(match.external_id), "match", "sofascore", session=self.session)
+            internal_id = get_internal_id(str(match.external_id), "match", "sofascore", self.session)
             if internal_id:
-                # Ghi chú: Chúng ta có thể cập nhật trận đấu ở đây nếu cần, nhưng hiện tại chỉ trả về ID
-                logger.debug("Match mapping already exists, skipping upsert.", extra={"ext_id": match.external_id, "int_id": internal_id})
+                logger.debug(f"Match mapping exists, skipping upsert. ExtID: {match.external_id}")
                 match.internal_id = internal_id
                 return internal_id
             
@@ -306,7 +281,7 @@ class SofaScoreLoader:
                     half_time_home_goals, half_time_away_goals, outcome, status
                 )
                 VALUES (
-                    :season_id, :dt, :round, :h_id, :a_id, :st_id, :ref_id, :hg, :ag, 
+                    :season_id, :dt, :match_week, :h_id, :a_id, :st_id, :ref_id, :hg, :ag, 
                     :hthg, :htag, :outcome, :status
                 )
                 ON CONFLICT (match_datetime, home_team_id, away_team_id) DO UPDATE SET
@@ -320,26 +295,22 @@ class SofaScoreLoader:
                 RETURNING id;
             ''')
             
-            # Đảm bảo các ID phụ thuộc không phải là None trước khi truy vấn
-            home_team_id = match.home_team.internal_id
-            away_team_id = match.away_team.internal_id
-            season_id = match.season.internal_id 
-            if not all([home_team_id, away_team_id, season_id]):
+            if not all([match.home_team.internal_id, match.away_team.internal_id, match.season.internal_id]):
                 raise ValueError("Missing internal IDs for team or season.")
 
             params = {
-                "season_id": season_id,
+                "season_id": match.season.internal_id,
                 "dt": match.match_datetime,
-                "h_id": home_team_id,
-                "a_id": away_team_id,
-                "hg": match.home_goals,
-                "ag": match.away_goals,
-                "hthg": match.ht_home_goals,
-                "htag": match.ht_away_goals,
-                "status": match.status.strip(),
-                "round": str(match.round) if match.round else None,
+                "match_week": match.match_week, 
+                "h_id": match.home_team.internal_id,
+                "a_id": match.away_team.internal_id,
                 "st_id": match.stadium.internal_id if match.stadium else None,
                 "ref_id": match.referee.internal_id if match.referee else None,
+                "hg": match.home_goals,
+                "ag": match.away_goals,
+                "hthg": match.half_time_home_goals,
+                "htag": match.half_time_away_goals,
+                "status": match.status,
                 "outcome": match.outcome if match.status == 'FINISHED' else None
             }
             
@@ -347,60 +318,76 @@ class SofaScoreLoader:
             match.internal_id = result.scalar_one_or_none()
             
             if match.internal_id:
-                upsert_mapping(str(match.external_id), match.internal_id, "match", "sofascore", session=self.session)
-                logger.debug("Successfully upserted match", extra={"ext_id": match.external_id, "int_id": match.internal_id})
+                upsert_mapping(str(match.external_id), match.internal_id, "match", "sofascore", self.session)
+                logger.debug(f"Upserted Match: ExtID {match.external_id}, IntID {match.internal_id}")
                 return match.internal_id
-            else:
-                logger.warning("Match upsert returned no ID", extra={"ext_id": match.external_id})
-                return None
+            return None
                     
         except Exception:
-            logger.error("Failed to upsert match", extra={"match_ext_id": getattr(match, 'external_id', None)}, exc_info=True)
+            logger.error(f"Failed to upsert match: ExtID {getattr(match, 'external_id', None)}", exc_info=True)
             raise
+    
+    def upsert_match_event(self, event: ParsedMatchEvent, match_internal_id: int):
+        """Inserts a single match event record. This is a simple INSERT, not an upsert."""
+        if not event or not match_internal_id:
+            return
+        try:
+            # Upsert các thực thể liên quan
+            team_id = self.upsert_team(event.team) if event.team else None
+            player_id = self.upsert_player(event.player) if event.player else None
+            related_player_id = self.upsert_player(event.related_player) if event.related_player else None
+
+            query = text('''
+                INSERT INTO "MatchEvents" (
+                    match_id, minute, event_type, team_id, player_id, 
+                    related_player_id, period, description
+                ) VALUES (
+                    :match_id, :minute, :event_type, :team_id, :player_id,
+                    :related_player_id, :period, :description
+                )
+            ''')
+            params = {
+                "match_id": match_internal_id,
+                "minute": event.minute,
+                "event_type": event.event_type,
+                "team_id": team_id,
+                "player_id": player_id,
+                "related_player_id": related_player_id,
+                "period": event.period,
+                "description": event.description
+            }
+            self.session.execute(query, params)
+        except Exception:
+            logger.error(f"Failed to insert match event for match_id {match_internal_id}", exc_info=True)
         
     def load_full_match_data(self, match: ParsedMatch) -> Optional[int]:
-        """
-        Điều phối việc tải một trận đấu hoàn chỉnh và các thực thể liên quan của nó.
-        """
+        """Điều phối việc tải một trận đấu hoàn chỉnh và các thực thể liên quan của nó."""
         try:
-            # Upsert các thực thể phụ thuộc và điền internal_id vào object `match`
-            self.upsert_season(match.season) # Lệnh này sẽ tự động upsert league
+            self.upsert_season(match.season)
             self.upsert_team(match.home_team)
             self.upsert_team(match.away_team)
-            if match.stadium:
-                self.upsert_stadium(match.stadium)
-            if match.referee:
-                self.upsert_referee(match.referee)
+            self.upsert_stadium(match.stadium)
+            self.upsert_referee(match.referee)
             
-            # Giờ đây, tất cả các internal_id cần thiết đã có trong object `match`
-            # và chúng ta có thể upsert trận đấu chính
             match_id = self.upsert_match(match)
             
+            if match_id and match.events:
+                # Xóa các sự kiện cũ để tránh trùng lặp nếu chạy lại
+                self.session.execute(text('DELETE FROM "MatchEvents" WHERE match_id = :mid'), {"mid": match_id})
+                for event in match.events:
+                    self.upsert_match_event(event, match_id)
+
             if match_id:
-                logger.info("Successfully loaded complete match data", extra={"match_ext_id": match.external_id, "match_int_id": match_id})
+                logger.info(f"Successfully loaded complete match data: ExtID {match.external_id}, IntID {match_id}")
             return match_id
                     
         except Exception:
-            logger.error(f"Error during full match data loading", extra={"match_ext_id": getattr(match, 'external_id', None)}, exc_info=True)
-            raise # Ném lỗi để transaction bên ngoài có thể rollback
+            logger.error(f"Error during full match data loading: ExtID {getattr(match, 'external_id', None)}", exc_info=True)
+            raise
 
-    def bulk_load_matches(self, matches: list[ParsedMatch]) -> Dict[str, Any]:
-        """
-        Bulk load multiple matches with comprehensive error tracking.
-        
-        Args:
-            matches: List of ParsedMatch objects
-            
-        Returns:
-            Dictionary with success/failure statistics
-        """
-        results = {
-            "total": len(matches),
-            "success": 0,
-            "failed": 0,
-            "failed_matches": []
-        }
-        
+    def bulk_load_matches(self, matches: List[ParsedMatch]) -> Dict[str, Any]:
+        """Tải hàng loạt các trận đấu với theo dõi lỗi chi tiết."""
+        results = {"total": len(matches), "success": 0, "failed": 0, "failed_matches": []}
         for match in matches:
             try:
                 match_id = self.load_full_match_data(match)
@@ -408,20 +395,11 @@ class SofaScoreLoader:
                     results["success"] += 1
                 else:
                     results["failed"] += 1
-                    results["failed_matches"].append({
-                        "external_id": getattr(match, 'external_id', None),
-                        "reason": "load_full_match_data returned None"
-                    })
+                    results["failed_matches"].append({ "external_id": match.external_id, "reason": "Loader returned None"})
             except Exception as e:
                 results["failed"] += 1
-                results["failed_matches"].append({
-                    "external_id": getattr(match, 'external_id', None),
-                    "reason": str(e)
-                })
-                logger.error("Error in bulk_load_matches", extra={
-                    "match_external_id": getattr(match, 'external_id', None),
-                    "error": str(e)
-                }, exc_info=True)
+                results["failed_matches"].append({ "external_id": match.external_id, "reason": str(e)})
+                # Không log lỗi ở đây nữa vì nó đã được log ở các hàm con
         
         logger.info("Bulk load completed", extra=results)
         return results

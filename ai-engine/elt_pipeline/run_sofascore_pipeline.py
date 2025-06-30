@@ -123,7 +123,7 @@ class SofaScoreETLOrchestrator:
         """Xử lý toàn bộ một mùa giải, trả về kết quả chi tiết."""
         logger.info(f"--- Starting ETL for season: {season_name} (ID: {season_id}) ---")
         
-        # CẢI TIẾN: Bọc fetch_paginated_data trong try-except
+        # Bọc fetch_paginated_data trong try-except
         try:
             extractor = self._get_extractor()
             # --- EXTRACT (Summaries) ---
@@ -179,8 +179,7 @@ class SofaScoreETLOrchestrator:
 # --- Các hàm hỗ trợ ---
 def handle_graceful_shutdown(signum, frame):
     """Xử lý tín hiệu Ctrl+C để tắt chương trình một cách an toàn."""
-    logger.warning(f"Received signal {signum}. Shutting down gracefully...")
-    sys.exit(130) 
+    raise KeyboardInterrupt 
 
 def setup_cache(config: ConfigManager):
     """Kích hoạt caching nếu được cấu hình."""
@@ -263,7 +262,8 @@ def run_pipeline(specific_season_names: Optional[List[str]] = None) -> bool:
 def main():
     """Entry point của ứng dụng: Phân tích tham số, thiết lập và chạy pipeline."""
     
-    # CẢI TIẾN: Sử dụng cấu trúc try...except...finally và trả về exit_code
+    # Sử dụng cấu trúc try...except...finally và trả về exit_code
+    exit_code = 1
     try:
         # 1. Bắt các tín hiệu để tắt an toàn
         signal.signal(signal.SIGINT, handle_graceful_shutdown)
@@ -312,20 +312,23 @@ def main():
         else:
             logger.error(f"✗ PIPELINE COMPLETED WITH ERRORS in {total_duration.total_seconds():.2f} seconds.")
             return 1  # Mã thoát 1 = THẤT BẠI
-            
+        exit_code = 0 if pipeline_succeeded else 1
+    
     except KeyboardInterrupt:
-        logger.warning("Pipeline interrupted by user.")
-        return 130
+        print("\n[SHUTDOWN] Pipeline interrupted by user.", file=sys.stderr)
+        exit_code = 130
     except Exception as e:
-        # Bắt các lỗi nghiêm trọng không lường trước được ở tầng cao nhất
-        # (ví dụ lỗi trong argparse, signal...)
-        if 'logger' in globals():
+        # Bắt các lỗi nghiêm trọng khác
+        if 'logger' in globals() and logger.handlers:
             logger.critical(f"A fatal unhandled error occurred in __main__: {e}", exc_info=True)
         else:
             print(f"CRITICAL ERROR (logger not available): {e}", file=sys.stderr)
-        return 1
+        exit_code = 1
     finally:
-        cleanup_cache()
+        # atexit sẽ tự động gọi teardown_logging.
+        cleanup_cache() 
+        print("[SHUTDOWN] Cleanup complete. Exiting.", file=sys.stderr)
+        return exit_code
 
 if __name__ == "__main__":
     exit_code = main()

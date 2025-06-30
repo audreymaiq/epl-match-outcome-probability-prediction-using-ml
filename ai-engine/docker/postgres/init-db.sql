@@ -3,18 +3,22 @@
 -- 1. CREATE TYPE ENUMs
 CREATE TYPE "MatchOutcome" AS ENUM ('H', 'D', 'A');
 
-CREATE TYPE "MatchStatus" AS ENUM ('SCHEDULED', 'FINISHED', 'POSTPONED', 'CANCELLED' /*, 'IN_PROGRESS' nếu cần realtime*/);
+CREATE TYPE "MatchStatus" AS ENUM ('SCHEDULED', 'FINISHED', 'POSTPONED', 'CANCELLED' , 'IN_PROGRESS', 'ABANDONED');
 
-CREATE TYPE "PlayerStatus" AS ENUM ('Available', 'Injured', 'Suspended', 'Doubtful', 'Away on Intl Duty');
+CREATE TYPE "PlayerStatus" AS ENUM ('Available', 'Injured', 'Suspended', 'Questionable', 'Away on Intl Duty', 'Missing Fixture' );
 
 CREATE TYPE "LocationType" AS ENUM ('Home', 'Away', 'Overall');
 
 CREATE TYPE "MatchEventType" AS ENUM (
   'goal', 'yellow card', 'red card', 'substitution', 'foul',
-  'corner', 'offside', 'penalty', 'own goal', 'missed penalty'
+  'corner', 'offside', 'penalty', 'own goal', 'missed penalty',
+  'penalty_goal', 'var_decision', 'goal_cancelled', 'penalty_confirmed',
+  'injury', 'corner_kick', 'free_kick'
 );
 
 CREATE TYPE "MatchPeriod" AS ENUM ('1H', '2H', 'ET1', 'ET2', 'PEN');
+
+CREATE TYPE "PlayerPosition" AS ENUM ('GK', 'DEF', 'MID', 'FWD');
 
 -- 2. Bảng Leagues
 CREATE TABLE "Leagues" (
@@ -108,7 +112,7 @@ COMMENT ON COLUMN "Referees"."created_at" IS 'Record creation timestamp';
 CREATE TABLE "Players" (
   "id" SERIAL PRIMARY KEY,
   "name" VARCHAR(255) NOT NULL,
-  "position" VARCHAR(50),  -- ví dụ 'GK','DEF','MID','FWD' hoặc chi tiết hơn
+  "position" "PlayerPosition",  -- ví dụ 'GK','DEF','MID','FWD' hoặc chi tiết hơn
   "date_of_birth" DATE,
   "nationality" VARCHAR(100),
   "height" INT CHECK (height >= 0),

@@ -17,6 +17,9 @@ from config.settings import get_config
 # )
 from .core_constants import PlayerPosition, MatchStatus, MatchOutcome
 
+import logging
+logger = logging.getLogger(__name__)
+
 # ======================== CONFIGURATION LOADING ========================
 @lru_cache(maxsize=1)
 def _get_config():
@@ -437,12 +440,27 @@ class SeasonBusinessLogic:
         return f"{year}/{str(year + 1)[-2:]}"
     
     @staticmethod
-    def extract_year_from_season(season: str) -> int:
-        """Extract năm bắt đầu từ tên mùa giải (ví dụ: "2023/24" -> 2023)"""
+    def extract_year_from_season(season_name: Optional[str]) -> Optional[int]:
+        """
+        Extract năm bắt đầu từ tên mùa giải (ví dụ: "2023/24" -> 2023).
+        Xử lý nhiều định dạng và trả về None nếu không hợp lệ.
+        """
+        if not season_name:
+            return None
+        
         try:
-            return int(season.split('/')[0])
+            # Ưu tiên các định dạng phổ biến
+            if '/' in season_name:
+                return int(season_name.split('/')[0])
+            elif '-' in season_name:
+                return int(season_name.split('-')[0])
+            else:
+                # Thử coi nó như một năm duy nhất
+                return int(season_name)
         except (ValueError, IndexError):
-            raise ValueError(f"Invalid season format: {season}")
+            # Nếu tất cả các cách trên đều thất bại
+            logger.warning(f"Could not parse season year from '{season_name}'")
+            return None
     
     @staticmethod
     def is_season_complete(season: str, timezone: str = "Europe/London") -> bool:

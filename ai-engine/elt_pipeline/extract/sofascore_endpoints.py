@@ -3,21 +3,50 @@
 import logging
 import re
 from enum import Enum
-from typing import Dict, Any, Optional, Tuple, Set
+from typing import Dict, Any, Optional, Tuple, Set, Union, TYPE_CHECKING
 from urllib.parse import urlencode
 from functools import lru_cache
 
 # Import các thành phần cấu hình cần thiết
-from config.settings import SofascoreSettings
+if TYPE_CHECKING:
+    from config.settings import ConfigManager
 
 logger = logging.getLogger(__name__)
+
+class ConfigValidator:
+    """Configuration validation utilities."""
+    
+    @staticmethod
+    def validate_base_url(url: str) -> str:
+        """Validate and normalize base URL."""
+        if not url or not isinstance(url, str):
+            raise ValueError(f"Base URL must be non-empty string, got: {url}")
+        
+        if not url.startswith(('http://', 'https://')):
+            raise ValueError(f"Base URL must start with http:// or https://, got: {url}")
+        
+        return url.rstrip('/')
+    
+    @staticmethod
+    def validate_rate_limit(rate: Union[int, float]) -> int:
+        """Validate rate limit value."""
+        if not isinstance(rate, (int, float)) or rate <= 0:
+            raise ValueError(f"Rate limit must be positive number, got: {rate}")
+        
+        return max(1, int(rate))
+    
+    @staticmethod
+    def validate_timeout(timeout: Union[int, float]) -> int:
+        """Validate timeout value."""
+        if not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise ValueError(f"Timeout must be positive number, got: {timeout}")
+        
+        return max(1, int(timeout))
 
 class SofaScoreEndpoints(Enum):
     """
     SofaScore API endpoints - chỉ chứa endpoint paths.
-    
     Tất cả endpoints được verify với SofaScore API thực tế.
-    Tuân thủ Single Responsibility Principle - chỉ định nghĩa endpoints.
     """
     
     # === Core Match Endpoints ===
@@ -261,7 +290,8 @@ def validate_endpoint_params(endpoint: SofaScoreEndpoints, **kwargs) -> Dict[str
     
     return validated_params
 
-def _get_config():
+@lru_cache(maxsize=1)
+def _get_config() -> 'ConfigManager':
     """
     Lazy import và cache config để tránh circular import.
     
@@ -275,9 +305,8 @@ def _get_config():
         from config.settings import get_config
         return get_config()
     except ImportError as e:
-        logging.error(f"Cannot import config: {e}")
+        logger.error(f"Cannot import config: {e}")
         raise ImportError("Cannot access configuration. Ensure settings module is available.") from e
-
 
 @lru_cache(maxsize=1)
 def _get_base_url() -> str:
@@ -318,28 +347,34 @@ def get_rate_limit_per_second(endpoint: SofaScoreEndpoints) -> int:
         
         # Convert requests_per_minute to requests_per_second
         requests_per_minute = config.sofascore.requests_per_minute
-        base_rate_per_second = max(1, requests_per_minute // 60)
+        validated_rate = ConfigValidator.validate_rate_limit(requests_per_minute)
+        base_rate_per_second = max(1, validated_rate // 60)
         
         # Áp dụng modifier theo category
         category = get_endpoint_category(endpoint)
         
         if category == EndpointCategory.LIVE:
             # Live endpoints: giảm 50% để tránh overload
-            return max(1, base_rate_per_second // 2)
+            result = max(1, base_rate_per_second // 2)
         elif category == EndpointCategory.SEARCH:
             # Search endpoints: giảm 75% vì thường có rate limit nghiêm ngặt
-            return max(1, base_rate_per_second // 4)
+            result = max(1, base_rate_per_second // 4)
         elif category == EndpointCategory.MEDIA:
             # Media endpoints: có thể tăng 50% vì ít sensitive hơn
-            return base_rate_per_second + max(1, base_rate_per_second // 2)
+            result = base_rate_per_second + max(1, base_rate_per_second // 2)
         else:
             # Standard endpoints
-            return base_rate_per_second
+            result = base_rate_per_second
+        
+        logger.debug(f"Rate limit for {endpoint.name}: {result} req/sec")
+        return result
             
-    except Exception as e:
-        logging.warning(f"Error getting rate limit from config: {e}. Using default.")
+    except (AttributeError, TypeError, KeyError) as e:
+        logger.warning(f"Config error getting rate limit for {endpoint.name}: {e}. Using default.")
         return 1  # Safe default
-
+    except Exception as e:
+        logger.error(f"Unexpected error getting rate limit for {endpoint.name}: {e}")
+        return 1  # Safe fallback
 
 def get_timeout_settings(endpoint: SofaScoreEndpoints) -> Tuple[int, int]:
     """
@@ -359,26 +394,33 @@ def get_timeout_settings(endpoint: SofaScoreEndpoints) -> Tuple[int, int]:
     
     try:
         config = _get_config()
-        connect_timeout = config.scraping.connect_timeout
-        read_timeout = config.scraping.read_timeout
+        
+        # Validate timeout values
+        connect_timeout = ConfigValidator.validate_timeout(config.scraping.connect_timeout)
+        read_timeout = ConfigValidator.validate_timeout(config.scraping.read_timeout)
         
         # Điều chỉnh timeout theo category
         category = get_endpoint_category(endpoint)
         
         if category == EndpointCategory.LIVE:
             # Live endpoints: timeout ngắn hơn để real-time
-            return (connect_timeout // 2, read_timeout // 2)
+            result = (max(5, connect_timeout // 2), max(10, read_timeout // 2))
         elif category == EndpointCategory.MEDIA:
             # Media endpoints: timeout dài hơn cho việc download
-            return (connect_timeout, read_timeout * 2)
+            result = (connect_timeout, read_timeout * 2)
         else:
             # Standard và Search endpoints
-            return (connect_timeout, read_timeout)
+            result = (connect_timeout, read_timeout)
+        
+        logger.debug(f"Timeout for {endpoint.name}: connect={result[0]}s, read={result[1]}s")
+        return result
             
-    except Exception as e:
-        logging.warning(f"Error getting timeout from config: {e}. Using defaults.")
+    except (AttributeError, TypeError, KeyError) as e:
+        logger.warning(f"Config error getting timeout for {endpoint.name}: {e}. Using defaults.")
         return (10, 30)  # Safe defaults
-
+    except Exception as e:
+        logger.error(f"Unexpected error getting timeout for {endpoint.name}: {e}")
+        return (10, 30)  # Safe fallback
 
 def get_headers(endpoint: SofaScoreEndpoints, referer: Optional[str] = None) -> Dict[str, str]:
     """
@@ -407,7 +449,6 @@ def get_headers(endpoint: SofaScoreEndpoints, referer: Optional[str] = None) -> 
             "Accept": "application/json",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
-
 
 def build_url(
     endpoint: SofaScoreEndpoints, 
@@ -480,88 +521,54 @@ def requires_auth(endpoint: SofaScoreEndpoints) -> bool:
     if not isinstance(endpoint, SofaScoreEndpoints):
         raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
     
-    # Hiện tại không có endpoint nào cần auth
-    # Có thể extend trong tương lai
-    premium_endpoints = set()  # type: set[SofaScoreEndpoints]
-    
+    premium_endpoints: Set[SofaScoreEndpoints] = set()
     return endpoint in premium_endpoints
 
+# === Convenience Functions ===
 
-# Convenience functions cho các use cases phổ biến
+def _validate_positive_integer_id(id_value: Any, id_name: str) -> int:
+    """
+    Hàm helper tập trung để xác thực các ID là số nguyên dương.
+    Tuân thủ nguyên tắc DRY (Don't Repeat Yourself).
+    
+    Args:
+        id_value: Giá trị ID cần kiểm tra.
+        id_name: Tên của ID để hiển thị trong thông báo lỗi.
+        
+    Returns:
+        int: Giá trị ID đã được xác thực.
+        
+    Raises:
+        ValueError: Nếu ID không phải là số nguyên dương.
+    """
+    if not isinstance(id_value, int) or id_value <= 0:
+        raise ValueError(f"{id_name} phải là integer dương, nhận: {id_value}")
+    return id_value
+
 def build_tournament_url(tournament_id: int, params: Optional[Dict[str, Any]] = None) -> str:
     """
     Convenience function để build URL cho tournament info.
-    
-    Args:
-        tournament_id: ID của tournament
-        params: Optional query parameters
-        
-    Returns:
-        str: Tournament URL
-        
-    Raises:
-        ValueError: Nếu tournament_id không hợp lệ
     """
-    if not isinstance(tournament_id, int) or tournament_id <= 0:
-        raise ValueError(f"tournament_id phải là integer dương, nhận: {tournament_id}")
-    
-    return build_url(SofaScoreEndpoints.TOURNAMENT_INFO, params, tournament_id=tournament_id)
-
+    validated_id = _validate_positive_integer_id(tournament_id, "tournament_id")
+    return build_url(SofaScoreEndpoints.TOURNAMENT_INFO, params, tournament_id=validated_id)
 
 def build_match_url(match_id: int, params: Optional[Dict[str, Any]] = None) -> str:
     """
     Convenience function để build URL cho match detail.
-    
-    Args:
-        match_id: ID của match
-        params: Optional query parameters
-        
-    Returns:
-        str: Match URL
-        
-    Raises:
-        ValueError: Nếu match_id không hợp lệ
     """
-    if not isinstance(match_id, int) or match_id <= 0:
-        raise ValueError(f"match_id phải là integer dương, nhận: {match_id}")
-    
-    return build_url(SofaScoreEndpoints.MATCH_DETAIL, params, match_id=match_id)
+    validated_id = _validate_positive_integer_id(match_id, "match_id")
+    return build_url(SofaScoreEndpoints.MATCH_DETAIL, params, match_id=validated_id)
 
 def build_team_url(team_id: int, params: Optional[Dict[str, Any]] = None) -> str:
     """
     Convenience function để build URL cho team info.
-    
-    Args:
-        team_id: ID của team
-        params: Optional query parameters
-        
-    Returns:
-        str: Team URL
-        
-    Raises:
-        ValueError: Nếu team_id không hợp lệ
     """
-    if not isinstance(team_id, int) or team_id <= 0:
-        raise ValueError(f"team_id phải là integer dương, nhận: {team_id}")
-    
-    return build_url(SofaScoreEndpoints.TEAM_INFO, params, team_id=team_id)
-
+    validated_id = _validate_positive_integer_id(team_id, "team_id")
+    return build_url(SofaScoreEndpoints.TEAM_INFO, params, team_id=validated_id)
 
 def build_player_url(player_id: int, params: Optional[Dict[str, Any]] = None) -> str:
     """
     Convenience function để build URL cho player info.
-    
-    Args:
-        player_id: ID của player
-        params: Optional query parameters
-        
-    Returns:
-        str: Player URL
-        
-    Raises:
-        ValueError: Nếu player_id không hợp lệ
     """
-    if not isinstance(player_id, int) or player_id <= 0:
-        raise ValueError(f"player_id phải là integer dương, nhận: {player_id}")
-    
-    return build_url(SofaScoreEndpoints.PLAYER_INFO, params, player_id=player_id)
+    validated_id = _validate_positive_integer_id(player_id, "player_id")
+    return build_url(SofaScoreEndpoints.PLAYER_INFO, params, player_id=validated_id)

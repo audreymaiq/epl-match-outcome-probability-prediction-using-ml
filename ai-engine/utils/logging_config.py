@@ -80,7 +80,7 @@ class QueueLogHandler(logging.Handler):
                 pass  # Silent fallback nếu stderr cũng fail
 
 
-def _log_worker_func():
+def _log_worker_func(original_handlers): 
     """Worker xử lý log từ queue bất đồng bộ"""
     while True:
         try:
@@ -88,10 +88,9 @@ def _log_worker_func():
             if record is None:  # Tín hiệu dừng
                 break
             
-            logger = logging.getLogger(record.name)
-            # Xử lý log gốc không qua queue
-            if not getattr(record, 'from_worker', False):
-                logger.handle(record)
+            for handler in original_handlers:
+                if record.levelno >= handler.level:
+                    handler.emit(record)
             
             _log_queue.task_done()
         except Empty:
@@ -225,24 +224,25 @@ def setup_logging(log_dir: str = None, log_level: str = None):
     
     # Thiết lập hệ thống log bất đồng bộ
     if env != "test":
-        # Tạo và khởi động worker thread
+        root_logger = logging.getLogger()
+        
+        original_handlers = root_logger.handlers[:]
+
+        # Tạo worker thread và truyền handlers gốc vào.
         _log_worker_thread = threading.Thread(
             target=_log_worker_func,
+            args=(original_handlers,), # <<== TRUYỀN HANDLERS VÀO
             name="LogWorker",
             daemon=True
         )
         _log_worker_thread.start()
         
-        # Thay thế tất cả handlers bằng QueueHandler
-        root_logger = logging.getLogger()
+        # Tạo QueueHandler và thay thế các handlers hiện tại.
         queue_handler = QueueLogHandler(_log_queue)
         queue_handler.setLevel(logging.DEBUG)  # Bắt tất cả log
-        
-        # Giữ lại các handler cũ để xử lý lỗi queue
-        original_handlers = root_logger.handlers.copy()
         root_logger.handlers = [queue_handler]
         
-        # Lưu listener để dọn dẹp
+        # Lưu lại handlers gốc để teardown.
         _log_listener = {
             "original_handlers": original_handlers,
             "queue_handler": queue_handler

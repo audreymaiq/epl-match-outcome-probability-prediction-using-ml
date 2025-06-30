@@ -51,7 +51,8 @@ class DatabaseConnector:
                     # Enhanced connection args
                     connect_args = {
                         **ssl_args,
-                        "options": "-c statement_timeout=30000 -c timezone=UTC"
+                        "options": "-c statement_timeout=30000 -c timezone=UTC",
+                        "connect_timeout": 10  # Timeout 10 giây cho việc thiết lập kết nối
                     }
                     
                     cls._engine = create_engine(
@@ -63,8 +64,10 @@ class DatabaseConnector:
                         pool_use_lifo=True,  # Use LIFO for better connection reuse
                         poolclass=QueuePool,
                         connect_args=connect_args,
-                        echo=config.is_development,  # Log SQL in development
-                        echo_pool=config.is_development,  # Log pool events in development
+                        # echo=config.is_development,  # Log SQL in development
+                        echo=False,
+                        # echo_pool=config.is_development,  # Log pool events in development
+                        echo_pool=False,
                         future=True  # Use SQLAlchemy 2.0 style
                     )
                     

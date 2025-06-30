@@ -8,6 +8,7 @@ import time
 import logging
 from typing import List, Dict, Any, Optional
 from curl_cffi.requests import Session, RequestsError
+import pybreaker
 
 # Import các thành phần từ kiến trúc đã xây dựng
 from config.settings import SofascoreSettings, ScrapingSettings
@@ -33,11 +34,11 @@ class SofaScoreExtractor:
         logger.info(f"SofaScoreExtractor initialized, impersonating: '{self.scraping_config.browser_impersonate}'")
 
     def _make_request(
-            self, 
-            endpoint: SofaScoreEndpoints, 
-            params: Optional[Dict] = None,
-            breaker: Optional[Any] = None,
-            **kwargs
+        self,
+        endpoint: SofaScoreEndpoints,
+        params: Optional[Dict] = None,
+        breaker: Optional[pybreaker.CircuitBreaker] = None,
+        **kwargs
     ) -> Optional[Any]:
         """
         Phương thức private để thực hiện request với retry, delay và config động.
@@ -48,11 +49,9 @@ class SofaScoreExtractor:
         if 'match_id' in kwargs:
             referer = f"{base_web_url}/football/match-slug/{kwargs['match_id']}"
         elif 'team_id' in kwargs:
-            referer = f"{base_web_url}/team/{kwargs['team_id']}"        
-        
+            referer = f"{base_web_url}/team/{kwargs['team_id']}"
+
         url = build_url(endpoint, params, **kwargs)
-        
-        # Lấy cấu hình ĐỘNG cho từng endpoint cụ thể
         headers = get_headers(endpoint, referer=referer)
         timeout_val = self.scraping_config.request_timeout
         max_retries = self.scraping_config.max_retries
@@ -60,46 +59,51 @@ class SofaScoreExtractor:
 
         for attempt in range(max_retries):
             try:
-                random_delay = self.scraping_config.get_random_delay()
-                sleep_duration = random_delay * (backoff_factor ** attempt)
-                time.sleep(sleep_duration)
+                # Hàm thực thi request thực tế
+                def _execute_get():
+                    random_delay = self.scraping_config.get_random_delay()
+                    sleep_duration = random_delay * (backoff_factor ** attempt)
+                    time.sleep(sleep_duration)
 
-                # --- Lấy proxy ngẫu nhiên cho mỗi lần thử ---
-                proxy = self.scraping_config.get_random_proxy()
-                proxies = {"http": proxy, "https": proxy} if proxy else None
+                    proxy = self.scraping_config.get_random_proxy()
+                    proxies = {"http": proxy, "https": proxy} if proxy else None
 
-                log_extra = {
-                    "url": url, "attempt": attempt + 1, "timeout": timeout_val,
-                    "proxy": "Yes" if proxy else "No", "sleep": round(sleep_duration, 2)
-                }                
-                logger.debug("Making request", extra=log_extra)
+                    log_extra = {
+                        "url": url, "attempt": attempt + 1, "timeout": timeout_val,
+                        "proxy": "Yes" if proxy else "No", "sleep": round(sleep_duration, 2)
+                    }
+                    logger.debug("Making request", extra=log_extra)
 
-                response = self.session.get(url, headers=headers, timeout=timeout_val, proxies=proxies)
-                
-                if response.status_code == 404:
-                    if endpoint == SofaScoreEndpoints.SEASON_MATCHES and 'page' in kwargs:
-                        logger.info("End of pagination reached", extra={"url": url})
-                        return None  # Kết thúc pagination bình thường
-                    else:
-                        logger.warning("Resource not found", extra={"url": url})
-                        return None  # Resource không tồn tại
+                    response = self.session.get(url, headers=headers, timeout=timeout_val, proxies=proxies)
 
-                response.raise_for_status() # Ném exception cho các mã lỗi 4xx, 5xx khác
-                
-                # Nếu thành công, reset circuit breaker (nếu có)
+                    if response.status_code == 404:
+                        logger.warning("Resource not found (404)", extra={"url": url})
+                        return None
+
+                    response.raise_for_status()
+                    return response.json()
+
                 if breaker:
-                    breaker.reset()                
-                
-                return response.json()
-            
+                    # breaker.call sẽ tự xử lý exception và đếm lỗi
+                    return breaker.call(_execute_get)
+                else:
+                    # Nếu không có breaker, gọi thẳng
+                    return _execute_get()
+
+            except pybreaker.CircuitBreakerError as e:
+                logger.error(f"Circuit Breaker is open. Aborting request to {url}. Error: {e}")
+                raise
+
             except RequestsError as e:
-                logger.warning("Request failed", extra={
-                    "url": url, "attempt": attempt + 1, "max_retries": max_retries, "error": str(e)
-                })
-                # Nếu có circuit breaker, ghi nhận một lỗi
-                if breaker:
-                    breaker.call_failed()
-
+                logger.warning(
+                    "Request attempt failed with a network error.",
+                    extra={
+                        "url": url,
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "original_error": str(e)
+                    }
+                )
                 if attempt == max_retries - 1:
                     logger.error("Max retries exceeded for request.", extra={"url": url})
                     return None
@@ -116,7 +120,7 @@ class SofaScoreExtractor:
             
             data = self._make_request(endpoint, breaker=breaker, **kwargs)
             requests_made += 1 # Đếm mỗi lần gọi _make_request
-            
+
             items = data.get("events", []) if data else []
 
             if not isinstance(items, list) or not items:
