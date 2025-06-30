@@ -1,72 +1,81 @@
 # ai-engine\elt_pipeline\extract\sofascore_endpoints.py
 
-from urllib.parse import urlencode
-from enum import Enum
-from typing import Dict, Any, Optional, Tuple
 import logging
+import re
+from enum import Enum
+from typing import Dict, Any, Optional, Tuple, Set
+from urllib.parse import urlencode
 from functools import lru_cache
 
+# Import các thành phần cấu hình cần thiết
+from config.settings import SofascoreSettings
+
+logger = logging.getLogger(__name__)
 
 class SofaScoreEndpoints(Enum):
     """
-    Danh sách các endpoint của SofaScore API.
+    SofaScore API endpoints - chỉ chứa endpoint paths.
     
-    Chỉ chứa endpoint paths, không chứa configuration.
-    Configuration được quản lý bởi settings.py để tuân thủ Single Source of Truth.
+    Tất cả endpoints được verify với SofaScore API thực tế.
+    Tuân thủ Single Responsibility Principle - chỉ định nghĩa endpoints.
     """
     
-    # Tournament endpoints
-    TOURNAMENT_INFO = "/unique-tournament/{tournament_id}"
-    TOURNAMENT_SEASONS = "/unique-tournament/{tournament_id}/seasons"
-    TOURNAMENT_CATEGORIES = "/unique-tournament/{tournament_id}/categories"
-    TOURNAMENT_MEDIA = "/unique-tournament/{tournament_id}/media"
-    
-    # Season endpoints
-    SEASON_STANDINGS = "/unique-tournament/{tournament_id}/season/{season_id}/standings/total"
-    SEASON_MATCHES = "/unique-tournament/{tournament_id}/season/{season_id}/events/last/{page}"
-    SEASON_MATCHES_ROUND = "/unique-tournament/{tournament_id}/season/{season_id}/events/round/{round}"
-    SEASON_TOP_PLAYERS = "/unique-tournament/{tournament_id}/season/{season_id}/top-players/{type}"
-    SEASON_STATISTICS = "/unique-tournament/{tournament_id}/season/{season_id}/statistics"
-    
-    # Match endpoints
-    MATCH_DETAIL = "/event/{match_id}"
-    MATCH_LINEUPS = "/event/{match_id}/lineups"
+    # === Core Match Endpoints ===
+    MATCH_DETAIL = "/event/{match_id}/details"
+    MATCH_LINEUPS = "/event/{match_id}/lineups"  
     MATCH_STATISTICS = "/event/{match_id}/statistics"
-    MATCH_H2H = "/event/{match_id}/h2h/events"
     MATCH_INCIDENTS = "/event/{match_id}/incidents"
+    MATCH_H2H = "/event/{match_id}/h2h/events"
     MATCH_GRAPH = "/event/{match_id}/graph"
     MATCH_MOMENTUM = "/event/{match_id}/momentum"
     MATCH_HEATMAP = "/event/{match_id}/heatmap/{team_id}"
     MATCH_SHOTMAP = "/event/{match_id}/shotmap"
     MATCH_HIGHLIGHTS = "/event/{match_id}/highlights"
     
-    # Team endpoints
+    # === Tournament/Season Endpoints ===
+    TOURNAMENT_INFO = "/unique-tournament/{tournament_id}"
+    TOURNAMENT_SEASONS = "/unique-tournament/{tournament_id}/seasons"
+    TOURNAMENT_CATEGORIES = "/unique-tournament/{tournament_id}/categories"
+    TOURNAMENT_MEDIA = "/unique-tournament/{tournament_id}/media"
+    
+    # === Season-specific Endpoints ===
+    SEASON_STANDINGS = "/unique-tournament/{tournament_id}/season/{season_id}/standings/total"
+    SEASON_MATCHES_LAST = "/unique-tournament/{tournament_id}/season/{season_id}/events/last/{page}"
+    SEASON_MATCHES_NEXT = "/unique-tournament/{tournament_id}/season/{season_id}/events/next/{page}"
+    SEASON_MATCHES_ROUND = "/unique-tournament/{tournament_id}/season/{season_id}/events/round/{round}"
+    SEASON_TOP_PLAYERS = "/unique-tournament/{tournament_id}/season/{season_id}/top-players/{type}"
+    SEASON_STATISTICS = "/unique-tournament/{tournament_id}/season/{season_id}/statistics"
+    
+    # === Team Endpoints ===
     TEAM_INFO = "/team/{team_id}"
-    TEAM_MATCHES = "/team/{team_id}/events/last/{page}"
+    TEAM_DETAILS = "/team/{team_id}/details"
+    TEAM_PLAYERS = "/team/{team_id}/players"
+    TEAM_MATCHES_LAST = "/team/{team_id}/events/last/{page}"
     TEAM_MATCHES_NEXT = "/team/{team_id}/events/next/{page}"
     TEAM_STATISTICS = "/team/{team_id}/unique-tournament/{tournament_id}/season/{season_id}/statistics/overall"
     TEAM_STATISTICS_BREAKDOWN = "/team/{team_id}/unique-tournament/{tournament_id}/season/{season_id}/statistics/breakdown"
-    TEAM_FORM = "/team/{team_id}/events/last/{page}"
     TEAM_TRANSFERS = "/team/{team_id}/transfers"
-    TEAM_PLAYERS = "/team/{team_id}/players"
     TEAM_MEDIA = "/team/{team_id}/media"
     
-    # Player endpoints
+    # === Player Endpoints ===
     PLAYER_INFO = "/player/{player_id}"
+    PLAYER_DETAILS = "/player/{player_id}/details"
     PLAYER_STATISTICS = "/player/{player_id}/unique-tournament/{tournament_id}/season/{season_id}/statistics/overall"
+    PLAYER_SEASON_STATS = "/player/{player_id}/statistics/seasons"
     PLAYER_CHARACTERISTICS = "/player/{player_id}/characteristics"
     PLAYER_TRANSFERS = "/player/{player_id}/transfers"
     PLAYER_MEDIA = "/player/{player_id}/media"
     PLAYER_MATCHES = "/player/{player_id}/events/last/{page}"
     
-    # Live data endpoints
+    # === Live Data Endpoints ===
     LIVE_MATCHES = "/sport/{sport_id}/events/live"
     LIVE_MATCH_TRACKER = "/event/{match_id}/tracker"
     
-    # Search endpoints
+    # === Search Endpoints ===
+    SEARCH_ALL = "/search/all"
     SEARCH = "/search/{query}"
     
-    # Categories and sports
+    # === General Endpoints ===
     CATEGORIES = "/sport/{sport_id}/categories"
     SPORTS = "/sport"
 
@@ -94,6 +103,27 @@ class SofaScoreEndpoints(Enum):
             valid_keys = ', '.join(sorted(cls.__members__.keys()))
             raise ValueError(f"Invalid endpoint: {value!r}. Valid keys: {valid_keys}")
 
+    @lru_cache(maxsize=None)
+    def get_required_params(self) -> Set[str]:
+        """
+        Extract required parameters from endpoint path.
+        
+        Returns:
+            Set[str]: Set of required parameter names
+        """
+        return set(re.findall(r'\{(\w+)\}', self.value))
+    
+    def has_param(self, param: str) -> bool:
+        """
+        Check if endpoint requires specific parameter.
+        
+        Args:
+            param: Parameter name to check
+            
+        Returns:
+            bool: True if parameter is required
+        """
+        return param in self.get_required_params()
 
 class EndpointCategory(Enum):
     """
@@ -104,7 +134,6 @@ class EndpointCategory(Enum):
     MEDIA = "media"
     STANDARD = "standard"
 
-
 # Mapping endpoint → category để áp dụng rate limiting
 _ENDPOINT_CATEGORY_MAPPING = {
     # Live endpoints - cần real-time data, rate limit thấp
@@ -114,6 +143,7 @@ _ENDPOINT_CATEGORY_MAPPING = {
     SofaScoreEndpoints.MATCH_INCIDENTS: EndpointCategory.LIVE,
     
     # Search endpoints - thường có rate limit nghiêm ngặt
+    SofaScoreEndpoints.SEARCH_ALL: EndpointCategory.SEARCH,
     SofaScoreEndpoints.SEARCH: EndpointCategory.SEARCH,
     
     # Media endpoints - có thể cho phép rate cao hơn, cần timeout lớn
@@ -125,6 +155,111 @@ _ENDPOINT_CATEGORY_MAPPING = {
     SofaScoreEndpoints.MATCH_SHOTMAP: EndpointCategory.MEDIA,
 }
 
+def get_endpoint_category(endpoint: SofaScoreEndpoints) -> EndpointCategory:
+    """
+    Xác định category của endpoint để áp dụng rate limiting phù hợp.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        EndpointCategory: Category của endpoint
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    return _ENDPOINT_CATEGORY_MAPPING.get(endpoint, EndpointCategory.STANDARD)
+
+def is_live_endpoint(endpoint: SofaScoreEndpoints) -> bool:
+    """
+    Kiểm tra xem endpoint có phải là live endpoint không.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        bool: True nếu là live endpoint
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    return get_endpoint_category(endpoint) == EndpointCategory.LIVE
+
+def is_media_endpoint(endpoint: SofaScoreEndpoints) -> bool:
+    """
+    Kiểm tra xem endpoint có phải là media endpoint không.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        
+    Returns:
+        bool: True nếu là media endpoint
+        
+    Raises:
+        TypeError: Nếu endpoint không phải SofaScoreEndpoints
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
+    
+    return get_endpoint_category(endpoint) == EndpointCategory.MEDIA
+
+def validate_endpoint_params(endpoint: SofaScoreEndpoints, **kwargs) -> Dict[str, Any]:
+    """
+    Validate required parameters for endpoint.
+    
+    Args:
+        endpoint: SofaScore endpoint
+        **kwargs: Parameters to validate
+        
+    Returns:
+        Dict[str, Any]: Validated parameters
+        
+    Raises:
+        TypeError: If endpoint is not SofaScoreEndpoints
+        ValueError: If required parameters are missing or invalid
+    """
+    if not isinstance(endpoint, SofaScoreEndpoints):
+        raise TypeError(f"endpoint must be SofaScoreEndpoints, got: {type(endpoint)}")
+    
+    required_params = endpoint.get_required_params()
+    validated_params = {}
+    
+    # Check all required parameters are provided
+    missing_params = required_params - set(kwargs.keys())
+    if missing_params:
+        raise ValueError(
+            f"Missing required parameters for {endpoint.name}: {', '.join(missing_params)}"
+        )
+    
+    # Validate parameter types and values
+    for param in required_params:
+        value = kwargs[param]
+        
+        if param.endswith('_id'):
+            if not isinstance(value, int) or value <= 0:
+                raise ValueError(f"Parameter '{param}' must be positive integer, got: {value}")
+        elif param in ('page', 'round'):
+            if not isinstance(value, int) or value < 0:
+                raise ValueError(f"Parameter '{param}' must be non-negative integer, got: {value}")
+        elif param == 'query':
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Parameter '{param}' must be non-empty string, got: {value}")
+            value = value.strip()
+        elif param == 'type':
+            # For top players endpoint type validation
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Parameter '{param}' must be non-empty string, got: {value}")
+            value = value.strip()
+            
+        validated_params[param] = value
+    
+    return validated_params
 
 def _get_config():
     """
@@ -161,26 +296,6 @@ def _get_base_url() -> str:
     except Exception as e:
         logging.error(f"Error getting base URL from config: {e}")
         raise RuntimeError("Cannot retrieve base URL from configuration") from e
-
-
-def get_endpoint_category(endpoint: SofaScoreEndpoints) -> EndpointCategory:
-    """
-    Xác định category của endpoint để áp dụng rate limiting phù hợp.
-    
-    Args:
-        endpoint: SofaScore endpoint
-        
-    Returns:
-        EndpointCategory: Category của endpoint
-        
-    Raises:
-        TypeError: Nếu endpoint không phải SofaScoreEndpoints
-    """
-    if not isinstance(endpoint, SofaScoreEndpoints):
-        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
-    
-    return _ENDPOINT_CATEGORY_MAPPING.get(endpoint, EndpointCategory.STANDARD)
-
 
 def get_rate_limit_per_second(endpoint: SofaScoreEndpoints) -> int:
     """
@@ -345,45 +460,6 @@ def build_url(
     
     return full_url
 
-
-def is_live_endpoint(endpoint: SofaScoreEndpoints) -> bool:
-    """
-    Kiểm tra xem endpoint có phải là live endpoint không.
-    
-    Args:
-        endpoint: SofaScore endpoint
-        
-    Returns:
-        bool: True nếu là live endpoint
-        
-    Raises:
-        TypeError: Nếu endpoint không phải SofaScoreEndpoints
-    """
-    if not isinstance(endpoint, SofaScoreEndpoints):
-        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
-    
-    return get_endpoint_category(endpoint) == EndpointCategory.LIVE
-
-
-def is_media_endpoint(endpoint: SofaScoreEndpoints) -> bool:
-    """
-    Kiểm tra xem endpoint có phải là media endpoint không.
-    
-    Args:
-        endpoint: SofaScore endpoint
-        
-    Returns:
-        bool: True nếu là media endpoint
-        
-    Raises:
-        TypeError: Nếu endpoint không phải SofaScoreEndpoints
-    """
-    if not isinstance(endpoint, SofaScoreEndpoints):
-        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
-    
-    return get_endpoint_category(endpoint) == EndpointCategory.MEDIA
-
-
 def requires_auth(endpoint: SofaScoreEndpoints) -> bool:
     """
     Kiểm tra xem endpoint có cần authentication không.
@@ -451,7 +527,6 @@ def build_match_url(match_id: int, params: Optional[Dict[str, Any]] = None) -> s
     
     return build_url(SofaScoreEndpoints.MATCH_DETAIL, params, match_id=match_id)
 
-
 def build_team_url(team_id: int, params: Optional[Dict[str, Any]] = None) -> str:
     """
     Convenience function để build URL cho team info.
@@ -490,50 +565,3 @@ def build_player_url(player_id: int, params: Optional[Dict[str, Any]] = None) ->
         raise ValueError(f"player_id phải là integer dương, nhận: {player_id}")
     
     return build_url(SofaScoreEndpoints.PLAYER_INFO, params, player_id=player_id)
-
-
-def validate_endpoint_params(endpoint: SofaScoreEndpoints, **kwargs) -> Dict[str, Any]:
-    """
-    Validate các tham số required cho endpoint.
-    
-    Args:
-        endpoint: SofaScore endpoint
-        **kwargs: Parameters để validate
-        
-    Returns:
-        Dict[str, Any]: Validated parameters
-        
-    Raises:
-        TypeError: Nếu endpoint không phải SofaScoreEndpoints
-        ValueError: Nếu thiếu hoặc có tham số không hợp lệ
-    """
-    if not isinstance(endpoint, SofaScoreEndpoints):
-        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
-    
-    # Extract required parameters từ endpoint path
-    import re
-    required_params = re.findall(r'\{(\w+)\}', endpoint.value)
-    
-    validated_params = {}
-    
-    for param in required_params:
-        if param not in kwargs:
-            raise ValueError(f"Thiếu tham số bắt buộc '{param}' cho endpoint {endpoint.name}")
-        
-        value = kwargs[param]
-        
-        # Validate common parameter types
-        if param.endswith('_id'):
-            if not isinstance(value, int) or value <= 0:
-                raise ValueError(f"Parameter '{param}' phải là integer dương, nhận: {value}")
-        elif param in ('page', 'round'):
-            if not isinstance(value, int) or value < 0:
-                raise ValueError(f"Parameter '{param}' phải là integer không âm, nhận: {value}")
-        elif param == 'query':
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"Parameter '{param}' phải là string không rỗng, nhận: {value}")
-            value = value.strip()
-        
-        validated_params[param] = value
-    
-    return validated_params
