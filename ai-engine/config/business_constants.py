@@ -5,16 +5,9 @@ from typing import List, Tuple, FrozenSet, Dict, Any, Optional, Union
 from functools import lru_cache
 from datetime import datetime, timedelta
 import pytz
+import re
 
 from config.settings import get_config
-# from .core_constants import (
-#     PlayerPosition,
-#     MatchStatus,
-#     MatchOutcome,
-#     API_STATUS_MAPPING,
-#     API_POSITION_MAPPING,
-#     API_OUTCOME_MAPPING
-# )
 from .core_constants import PlayerPosition, MatchStatus, MatchOutcome
 
 import logging
@@ -59,7 +52,6 @@ class TeamPerformanceCategory(Enum):
 
 # ======================== MATCH STATUSES ========================
 MatchStatusCategory = MatchStatus
-# MATCH_STATUS_MAPPING = API_STATUS_MAPPING
 
 # ======================== PLAYER POSITIONS ========================
 # POSITION_MAPPING = API_POSITION_MAPPING
@@ -69,36 +61,8 @@ VALID_ENTITY_TYPES: FrozenSet[str] = frozenset({
     'team', 'player', 'match', 'stadium', 'league', 'referee'
 })
 
-# ======================== MATCH OUTCOMES ========================
-# OUTCOME_MAPPING = API_OUTCOME_MAPPING
-
-# ======================== SEASON CONSTANTS ========================
-# @lru_cache(maxsize=1)
-# def get_current_season() -> Tuple[int, int]:
-#     """Get current season dynamically with caching"""
-#     return _get_config().seasons.current_season
-
-# @lru_cache(maxsize=1)
-# def get_last_completed_season() -> Tuple[int, int]:
-#     """Get last completed season dynamically with caching"""
-#     return _get_config().seasons.last_completed_season
-
-# @lru_cache(maxsize=16)  
-# def get_seasons_to_fetch(start_year: int = 2018, min_count: int = 5) -> List[Tuple[int, int]]:
-#     """Get seasons to fetch with parameters and caching"""
-#     return _get_config().seasons.get_seasons_to_fetch(start_year, min_count)
-
 # Constants that can be computed once
 SEASON_FORMAT: str = "{start}/{end}"
-
-# ======================== SEASONS TO FETCH ========================
-# Backward compatibility - use default parameters
-# def get_default_seasons_to_fetch() -> List[Tuple[int, int]]:
-#     """Get default seasons to fetch"""
-#     return get_seasons_to_fetch()
-
-# For backward compatibility
-# SEASONS_TO_FETCH = get_default_seasons_to_fetch()
 
 # ======================== ML LABEL MAPPINGS ========================
 class MLOutcomeLabels(Enum):
@@ -448,19 +412,29 @@ class SeasonBusinessLogic:
         if not season_name:
             return None
         
-        try:
-            # Ưu tiên các định dạng phổ biến
-            if '/' in season_name:
-                return int(season_name.split('/')[0])
-            elif '-' in season_name:
-                return int(season_name.split('-')[0])
-            else:
-                # Thử coi nó như một năm duy nhất
-                return int(season_name)
-        except (ValueError, IndexError):
-            # Nếu tất cả các cách trên đều thất bại
-            logger.warning(f"Could not parse season year from '{season_name}'")
-            return None
+        # Biểu thức chính quy để tìm các định dạng năm `năm/năm` hoặc `năm-năm`
+        # Ưu tiên tìm định dạng 4 số trước.
+        # (\d{4})[/-]\d+  -> Tìm "2023" trong "2023/24" hoặc "2023-2024"
+        # (\d{2})[/-]\d+   -> Tìm "23" trong "23/24" hoặc "23-24"
+        match = re.search(r'(\d{4})[/-]\d+|(\d{2})[/-]\d+', season_name)
+
+        if match:
+            year_str = match.group(1) or match.group(2)
+
+            try:
+                # Nếu là định dạng 2 số (ví dụ "23"), chuyển thành 4 số ("2023")
+                if len(year_str) == 2:
+                    return int(f"20{year_str}")
+                # Nếu đã là 4 số
+                else:
+                    return int(year_str)
+            except ValueError:
+                # Trường hợp rất hiếm, nhưng vẫn phòng thủ
+                logger.warning(f"Regex matched but failed to convert to int: '{year_str}' from '{season_name}'")
+                return None
+
+        logger.warning(f"Could not parse a valid season year pattern from '{season_name}'")
+        return None
     
     @staticmethod
     def is_season_complete(season: str, timezone: str = "Europe/London") -> bool:

@@ -1,5 +1,4 @@
 # elt_pipeline/run_sofascore_pipeline.py
-# PHIÊN BẢN HOÀN CHỈNH ĐÃ SỬA LỖI VÀ TỐI ƯU HÓA
 
 import sys
 import signal

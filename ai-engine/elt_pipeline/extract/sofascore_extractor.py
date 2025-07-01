@@ -99,17 +99,12 @@ class SofaScoreExtractor:
 
             except CircuitBreakerError as e:
                 logger.error(f"Circuit Breaker is open. Aborting request to {url}. Error: {e}")
-                raise
+                raise # Ném lại để tầng trên (Orchestrator) xử lý
 
             except RequestsError as e:
                 logger.warning(
                     "Request attempt failed with a network error.",
-                    extra={
-                        "url": url,
-                        "attempt": attempt + 1,
-                        "max_retries": max_retries,
-                        "original_error": str(e)
-                    }
+                    extra={"url": url, "attempt": attempt + 1, "max_retries": max_retries, "original_error": str(e)}
                 )
                 if attempt == max_retries - 1:
                     logger.error("Max retries exceeded for request.", extra={"url": url})
@@ -124,8 +119,7 @@ class SofaScoreExtractor:
         empty_page_strikes = 0
         MAX_EMPTY_STRIKES = 2
         
-        # Determine the response field based on endpoint
-        response_field = "events"  # Default, có thể customize based on endpoint type
+        response_field = "events"  
         
         while empty_page_strikes < MAX_EMPTY_STRIKES:
             page += 1
@@ -137,23 +131,20 @@ class SofaScoreExtractor:
                 
                 if data is None:
                     empty_page_strikes += 1
-                    logger.info(f"No data received (strike {empty_page_strikes}/{MAX_EMPTY_STRIKES})", 
-                            extra={"endpoint": endpoint.name, "page": page})
+                    logger.info(f"No data received (strike {empty_page_strikes}/{MAX_EMPTY_STRIKES})", extra={"endpoint": endpoint.name, "page": page})
                     continue
                 
                 items = data.get(response_field, [])
                 
                 # Validate response structure
                 if not isinstance(items, list):
-                    logger.warning(f"Invalid response structure. Expected list, got {type(items)}", 
-                                extra={"endpoint": endpoint.name, "page": page})
+                    logger.warning(f"Invalid response structure. Expected list, got {type(items)}", extra={"endpoint": endpoint.name, "page": page})
                     empty_page_strikes += 1
                     continue
                     
                 if not items:
                     empty_page_strikes += 1
-                    logger.info(f"Empty page detected (strike {empty_page_strikes}/{MAX_EMPTY_STRIKES})", 
-                            extra={"endpoint": endpoint.name, "page": page})
+                    logger.info(f"Empty page detected (strike {empty_page_strikes}/{MAX_EMPTY_STRIKES})", extra={"endpoint": endpoint.name, "page": page})
                     continue
 
                 empty_page_strikes = 0
@@ -163,20 +154,18 @@ class SofaScoreExtractor:
                 logger.warning(f"Stopping pagination for {endpoint.name} as circuit breaker is open.")
                 break
             except Exception as e:
-                logger.error(f"Unexpected error during pagination", 
-                            extra={"endpoint": endpoint.name, "page": page, "error": str(e)})
+                logger.error(f"Unexpected error during pagination", extra={"endpoint": endpoint.name, "page": page, "error": str(e)})
                 requests_made += 1  # Count failed requests too
                 empty_page_strikes += 1
                 
-        logger.info(f"Pagination finished after {page} pages and {empty_page_strikes} empty strikes.", 
-                extra={"endpoint": endpoint.name, "total_items": len(all_items)})        
+        logger.info(f"Pagination finished after {page} pages and {empty_page_strikes} empty strikes.", extra={"endpoint": endpoint.name, "total_items": len(all_items)})        
         return all_items, requests_made
 
     def fetch_match_detail(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
         """Wrapper đơn giản để lấy chi tiết trận đấu."""
         try:
             data = self._make_request(SofaScoreEndpoints.MATCH_DETAIL, breaker=breaker, match_id=match_id)        
-            return data
+            return data.get("event") if data else None
         except CircuitBreakerError:
             return None
 

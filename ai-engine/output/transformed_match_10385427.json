@@ -1,0 +1,66 @@
+{
+    "external_id": 10385427,
+    "season": {
+        "name": "2022/23",
+        "start_year": 2022,
+        "end_year": 2023,
+        "league": {
+            "name": "Premier League",
+            "country": "England",
+            "established_year": null,
+            "internal_id": null
+        },
+        "internal_id": null
+    },
+    "match_datetime": "2023-01-15T16:00:00+00:00",
+    "match_week": "20",
+    "home_team": {
+        "external_id": 39,
+        "name": "Newcastle",
+        "short_name": "Newcastle",
+        "stadium": {
+            "name": "St James' Park",
+            "city": "Newcastle upon Tyne",
+            "capacity": 52409,
+            "timezone": null,
+            "internal_id": null
+        },
+        "established_year": null,
+        "logo_url": "https://api.sofascore.com/api/v1/team/39/image",
+        "internal_id": null
+    },
+    "away_team": {
+        "external_id": 43,
+        "name": "Fulham",
+        "short_name": "Fulham",
+        "stadium": null,
+        "established_year": null,
+        "logo_url": "https://api.sofascore.com/api/v1/team/43/image",
+        "internal_id": null
+    },
+    "status": "FINISHED",
+    "outcome": "H",
+    "home_goals": 1,
+    "away_goals": 1,
+    "half_time_home_goals": 1,
+    "half_time_away_goals": 0,
+    "stadium": {
+        "name": "St James' Park",
+        "city": "Newcastle upon Tyne",
+        "capacity": 52409,
+        "timezone": null,
+        "internal_id": null
+    },
+    "referee": {
+        "external_id": 74264,
+        "name": "Robert Jones",
+        "date_of_birth": null,
+        "country": null,
+        "internal_id": null
+    },
+    "importance": "LOW",
+    "status_label": 2,
+    "outcome_label": 0,
+    "internal_id": null,
+    "events": []
+}

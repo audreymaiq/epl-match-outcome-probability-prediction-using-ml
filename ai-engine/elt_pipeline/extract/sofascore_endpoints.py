@@ -50,7 +50,7 @@ class SofaScoreEndpoints(Enum):
     """
     
     # === Core Match Endpoints ===
-    MATCH_DETAIL = "/event/{match_id}/details"
+    MATCH_DETAIL = "/event/{match_id}"
     MATCH_LINEUPS = "/event/{match_id}/lineups"  
     MATCH_STATISTICS = "/event/{match_id}/statistics"
     MATCH_INCIDENTS = "/event/{match_id}/incidents"

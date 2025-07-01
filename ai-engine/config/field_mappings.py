@@ -327,6 +327,7 @@ SOFASCORE_FIELD_MAPPING = {
     "startTimestamp": "match_timestamp",
     "status.code": "status_code",
     "status.description": "status_description",
+    "roundInfo.round": "round",
     # Score
     "homeScore.current": "home_goals",
     "awayScore.current": "away_goals",
@@ -338,6 +339,9 @@ SOFASCORE_FIELD_MAPPING = {
     "player.dateOfBirthTimestamp": "date_of_birth_timestamp",
     "player.country.name": "nationality",
     "player.position": "position_code",
+    # Referee
+    "referee.id": "referee_id",
+    "referee.name": "referee_name", 
     # Statistics
     "statistics.goals": "goals",
     "statistics.assists": "assists",
@@ -358,8 +362,8 @@ SOFASCORE_FIELD_MAPPING = {
     "statistics.offsides": "offsides",
     # Venue
     "venue.id": "venue_id",
-    "venue.stadium.name": "venue_name",
-    "venue.stadium.capacity": "venue_capacity",
+    "venue.name": "venue_name",
+    "venue.capacity": "venue_capacity",
     "venue.city.name": "venue_city"
 }
 
