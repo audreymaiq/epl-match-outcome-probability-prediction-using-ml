@@ -1,8 +1,9 @@
 # ai-engine/config/core_constants.py
 
 from typing import Optional, Dict, Union
+from enum import Enum
 
-class MatchStatus:
+class MatchStatus(str, Enum):
     SCHEDULED = "SCHEDULED"
     IN_PROGRESS = "IN_PROGRESS"
     FINISHED = "FINISHED"
@@ -10,20 +11,20 @@ class MatchStatus:
     CANCELLED = "CANCELLED"
     ABANDONED = "ABANDONED"
     UNKNOWN = "Unknown"
-class PlayerPosition:
+class PlayerPosition(str, Enum):
     GK = "GK"
     DEF = "DEF"
     MID = "MID"
     FWD = "FWD"
     UNKNOWN = "Unknown"
 
-class MatchOutcome:
+class MatchOutcome(str, Enum):
     HOME = "H"
     DRAW = "D"
     AWAY = "A"
     UNKNOWN = "Unknown"
 
-class PlayerStatus:
+class PlayerStatus(str, Enum):
     AVAILABLE = "Available"
     AWAY_ON_INTL_DUTY = "Away on Intl Duty"
     MISSING_FIXTURE = "Missing Fixture"
@@ -160,7 +161,7 @@ API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING = {
 # --- Các hàm Mapping thống nhất - Trả về giá trị chuẩn hóa hoặc None ---
 
 # Unified mapping functions for easy switching between APIs
-def get_match_status(api_status: Optional[str], api_type: str = "sofascore") -> Optional[str]:
+def get_match_status(api_status: Optional[str], api_type: str = "sofascore") -> Optional[MatchStatus]:
     """
     Nhận trạng thái từ API và trả về trạng thái chuẩn hóa hoặc None nếu không xác định.
     """
@@ -174,7 +175,7 @@ def get_match_status(api_status: Optional[str], api_type: str = "sofascore") -> 
     
     return None
 
-def get_player_position(api_position: Optional[str], api_type: str = "sofascore") -> Optional[str]:
+def get_player_position(api_position: Optional[str], api_type: str = "sofascore") -> Optional[PlayerPosition]:
     """
     Nhận vị trí từ API và trả về vị trí chuẩn hóa hoặc None nếu không xác định.
     """
@@ -189,7 +190,7 @@ def get_player_position(api_position: Optional[str], api_type: str = "sofascore"
     
     return None
 
-def get_match_outcome(api_outcome: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[str]:
+def get_match_outcome(api_outcome: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[MatchOutcome]:
     """
     Nhận kết quả từ API và trả về kết quả chuẩn hóa hoặc None nếu không xác định.
     """
@@ -205,7 +206,7 @@ def get_match_outcome(api_outcome: Optional[Union[int, str]], api_type: str = "s
 
     return None
         
-def get_player_availability(api_status: Optional[str], api_type: str = "sofascore") -> Optional[str]:
+def get_player_availability(api_status: Optional[str], api_type: str = "sofascore") -> Optional[PlayerStatus]:
     """
     Nhận trạng thái sẵn sàng của cầu thủ từ API và trả về trạng thái chuẩn hóa hoặc None.
     """

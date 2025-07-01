@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, date
 from typing import Optional, List
 from dataclasses import dataclass
+from config.core_constants import MatchOutcome, MatchStatus, PlayerPosition
 
 """
 Định nghĩa các cấu trúc dữ liệu (schemas) đã được chuẩn hóa.
@@ -58,7 +59,7 @@ class ParsedPlayer:
     """Dữ liệu chuẩn hóa cơ bản cho một cầu thủ."""
     external_id: int
     name: str
-    position: Optional[str] = None
+    position: Optional[PlayerPosition] = None
     date_of_birth: Optional[date] = None
     nationality: Optional[str] = None
     height: Optional[int] = None
@@ -100,8 +101,8 @@ class ParsedMatch:
     away_team: ParsedTeam
     
     # Status & Outcome
-    status: str             # Trạng thái chuẩn hóa (e.g., FINISHED)
-    outcome: Optional[str]            # Kết quả chuẩn hóa (e.g., H, D, A)
+    status: MatchStatus             # Trạng thái chuẩn hóa (e.g., FINISHED)
+    outcome: Optional[MatchOutcome] # Kết quả trận đấu (e.g., HOME_WIN, AWAY_WIN, DRAW)
     
     # Scores
     home_goals: Optional[int]

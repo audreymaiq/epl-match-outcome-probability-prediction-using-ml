@@ -109,11 +109,20 @@ def upsert_mapping(
         if session is None:
             with DatabaseConnector.session_scope() as session:
                 result = session.execute(query, params)
+                upserted_id = result.scalar_one_or_none()
                 session.flush()
-                logger.info(f"Upserted mapping: {result.scalar()}")
+                logger.info(
+                    f"Upserted mapping for external_id='{external_id}' "
+                    f"(entity: {entity_type}, source: {source_system}) -> internal_id={internal_id}. "
+                    f"Mapping ID: {upserted_id}"
+                )
         else:
             result = session.execute(query, params)
-            logger.debug(f"Upserted mapping in external session: {result.scalar()}")
+            upserted_id = result.scalar_one_or_none()
+            logger.debug(
+                f"Upserted mapping (in external session) for external_id='{external_id}' "
+                f"-> internal_id={internal_id}. Mapping ID: {upserted_id}"
+            )
             
     except exc.IntegrityError as e:
         logger.error(f"Integrity error in upsert_mapping: {str(e)}")

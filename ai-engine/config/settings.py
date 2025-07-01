@@ -135,13 +135,6 @@ class APIFootballSettings(BaseSettings):
         """Kiểm tra API có được cấu hình đầy đủ không"""
         return bool(self.base_url and self.api_keys)
 
-    def __init__(self, **values):
-        super().__init__(**values)
-        if not self.api_keys:
-            raw = os.getenv("API_FOOTBALL_KEY")
-            if raw:
-                self.api_keys = [k.strip() for k in raw.split(",") if k.strip()]
-
 class SofascoreSettings(BaseSettings):
     """Cấu hình Sofascore API không chính thức - Enhanced for scraping"""
     model_config = SettingsConfigDict(

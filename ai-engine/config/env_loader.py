@@ -73,32 +73,34 @@ def load_environment(
             unique_dirs.append(d)
 
     # 5. Tìm file và load
-    loaded_path: Optional[Path] = None
-    file_found = False
+    candidates_to_load: List[Path] = []
 
-    for candidate in candidates:
-        for base in unique_dirs:
-            path = base / candidate
-            try:
-                if path.is_file() and os.access(path, os.R_OK):
-                    file_found = True
-                    success = load_dotenv(dotenv_path=path, override=override)
-                    if success:
-                        logger.info(f"Đã tải biến môi trường từ: {path}")
-                        loaded_path = path
-                        # Dừng tìm tiếp: ưu tiên file đầu tiên tìm thấy
-                        break
-                    else:
-                        logger.warning(f"Tìm thấy file env tại {path} nhưng load_dotenv trả False")
-            except Exception as e:
-                logger.error(f"Lỗi khi xử lý file env '{path}': {e}", exc_info=True)
-        if loaded_path:
-            break
+    # Tìm tất cả các file hợp lệ theo thứ tự ưu tiên từ cụ thể -> chung
+    for candidate_name in candidates: # ['.env.production', '.env.local', '.env']
+        for base_dir in unique_dirs:
+            path = base_dir / candidate_name
+            if path.is_file() and os.access(path, os.R_OK):
+                candidates_to_load.append(path)
+                # Đã tìm thấy file ứng viên này, không cần tìm file cùng tên ở nơi khác
+                break
+
+    # loaded_path sẽ lưu file có ưu tiên cao nhất (file cụ thể nhất)
+    loaded_path: Optional[Path] = candidates_to_load[0] if candidates_to_load else None
+
+    overall_success = False
+    for path in reversed(candidates_to_load):
+        # Luôn override để file cụ thể hơn ghi đè lên file chung chung
+        success = load_dotenv(dotenv_path=path, override=True) 
+        if success:
+            logger.info(f"Đã tải và áp dụng biến môi trường từ: {path}")
+            overall_success = True
+        else:
+            logger.warning(f"Tìm thấy file env tại {path} nhưng không load được nội dung.")    
 
     # 6. Log kết quả tìm file
-    if not file_found:
-        logger.info("ℹKhông tìm thấy file .env nào trong các thư mục tìm kiếm")
-    elif not loaded_path:
+    if not candidates_to_load:
+        logger.info("Không tìm thấy file .env nào trong các thư mục tìm kiếm")
+    elif not overall_success:
         # Tìm thấy file nhưng load thất bại hoặc không chứa biến valid
         logger.warning("Tìm thấy file .env nhưng không load được nội dung hợp lệ")
 

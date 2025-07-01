@@ -8,13 +8,13 @@ import time
 import logging
 from typing import List, Dict, Any, Optional
 from curl_cffi.requests import Session, RequestsError
-import pybreaker
+from pybreaker import CircuitBreaker, CircuitBreakerError
 
 # Import các thành phần từ kiến trúc đã xây dựng
 from config.settings import SofascoreSettings, ScrapingSettings
 from elt_pipeline.extract.sofascore_endpoints import (
     SofaScoreEndpoints, build_url, get_headers,
-    get_rate_limit_per_second, validate_endpoint_params
+    get_rate_limit_per_second, validate_endpoint_params, get_timeout_settings
 )
 
 # --- Cấu hình ban đầu ---
@@ -37,7 +37,7 @@ class SofaScoreExtractor:
         self,
         endpoint: SofaScoreEndpoints,
         params: Optional[Dict] = None,
-        breaker: Optional[pybreaker.CircuitBreaker] = None,
+        breaker: Optional[CircuitBreaker] = None,
         **kwargs
     ) -> Optional[Any]:
         """
@@ -53,7 +53,13 @@ class SofaScoreExtractor:
 
         url = build_url(endpoint, params, **kwargs)
         headers = get_headers(endpoint, referer=referer)
-        timeout_val = self.scraping_config.request_timeout
+
+        connect_timeout, read_timeout = get_timeout_settings(endpoint)
+        timeout_tuple = (connect_timeout, read_timeout)
+
+        rate_limit_rps = get_rate_limit_per_second(endpoint)
+        base_delay = 1.0 / rate_limit_rps if rate_limit_rps > 0 else 1.0
+
         max_retries = self.scraping_config.max_retries
         backoff_factor = self.scraping_config.backoff_factor
 
@@ -62,19 +68,20 @@ class SofaScoreExtractor:
                 # Hàm thực thi request thực tế
                 def _execute_get():
                     random_delay = self.scraping_config.get_random_delay()
-                    sleep_duration = random_delay * (backoff_factor ** attempt)
-                    time.sleep(sleep_duration)
+                    total_delay = (base_delay + random_delay) * (backoff_factor ** attempt)
+                    if attempt > 0 or base_delay > 0:
+                        time.sleep(total_delay)
 
                     proxy = self.scraping_config.get_random_proxy()
                     proxies = {"http": proxy, "https": proxy} if proxy else None
 
                     log_extra = {
-                        "url": url, "attempt": attempt + 1, "timeout": timeout_val,
-                        "proxy": "Yes" if proxy else "No", "sleep": round(sleep_duration, 2)
+                        "url": url, "attempt": attempt + 1, "timeout": timeout_tuple,
+                        "proxy": "Yes" if proxy else "No", "sleep": round(total_delay, 2)
                     }
                     logger.debug("Making request", extra=log_extra)
 
-                    response = self.session.get(url, headers=headers, timeout=timeout_val, proxies=proxies)
+                    response = self.session.get(url, headers=headers, timeout=timeout_tuple , proxies=proxies)
 
                     if response.status_code == 404:
                         logger.warning("Resource not found (404)", extra={"url": url})
@@ -90,7 +97,7 @@ class SofaScoreExtractor:
                     # Nếu không có breaker, gọi thẳng
                     return _execute_get()
 
-            except pybreaker.CircuitBreakerError as e:
+            except CircuitBreakerError as e:
                 logger.error(f"Circuit Breaker is open. Aborting request to {url}. Error: {e}")
                 raise
 
@@ -109,44 +116,102 @@ class SofaScoreExtractor:
                     return None
         return None
     
-    def fetch_paginated_data(self, endpoint: SofaScoreEndpoints, breaker: Optional[Any] = None, **kwargs) -> tuple[List[Dict], int]:
+    def fetch_paginated_data(self, endpoint: SofaScoreEndpoints, breaker: Optional[CircuitBreaker] = None, **kwargs) -> tuple[List[Dict], int]:
         """Fetch dữ liệu từ các endpoint có phân trang và trả về số request đã thực hiện."""
         all_items = []
         page = 0
         requests_made = 0
-        while True:
+        empty_page_strikes = 0
+        MAX_EMPTY_STRIKES = 2
+        
+        # Determine the response field based on endpoint
+        response_field = "events"  # Default, có thể customize based on endpoint type
+        
+        while empty_page_strikes < MAX_EMPTY_STRIKES:
             page += 1
             kwargs['page'] = page
             
-            data = self._make_request(endpoint, breaker=breaker, **kwargs)
-            requests_made += 1 # Đếm mỗi lần gọi _make_request
+            try:
+                data = self._make_request(endpoint, breaker=breaker, **kwargs)
+                requests_made += 1
+                
+                if data is None:
+                    empty_page_strikes += 1
+                    logger.info(f"No data received (strike {empty_page_strikes}/{MAX_EMPTY_STRIKES})", 
+                            extra={"endpoint": endpoint.name, "page": page})
+                    continue
+                
+                items = data.get(response_field, [])
+                
+                # Validate response structure
+                if not isinstance(items, list):
+                    logger.warning(f"Invalid response structure. Expected list, got {type(items)}", 
+                                extra={"endpoint": endpoint.name, "page": page})
+                    empty_page_strikes += 1
+                    continue
+                    
+                if not items:
+                    empty_page_strikes += 1
+                    logger.info(f"Empty page detected (strike {empty_page_strikes}/{MAX_EMPTY_STRIKES})", 
+                            extra={"endpoint": endpoint.name, "page": page})
+                    continue
 
-            items = data.get("events", []) if data else []
-
-            if not isinstance(items, list) or not items:
-                logger.info("No more items found...", extra={"endpoint": endpoint.name, "last_page": page-1})
+                empty_page_strikes = 0
+                all_items.extend(items)
+                
+            except CircuitBreakerError:
+                logger.warning(f"Stopping pagination for {endpoint.name} as circuit breaker is open.")
                 break
-            
-            all_items.extend(items)
-            
+            except Exception as e:
+                logger.error(f"Unexpected error during pagination", 
+                            extra={"endpoint": endpoint.name, "page": page, "error": str(e)})
+                requests_made += 1  # Count failed requests too
+                empty_page_strikes += 1
+                
+        logger.info(f"Pagination finished after {page} pages and {empty_page_strikes} empty strikes.", 
+                extra={"endpoint": endpoint.name, "total_items": len(all_items)})        
         return all_items, requests_made
 
-    def fetch_match_detail(self, match_id: int, breaker: Optional[Any] = None) -> Optional[Dict]:
+    def fetch_match_detail(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
         """Wrapper đơn giản để lấy chi tiết trận đấu."""
-        data = self._make_request(SofaScoreEndpoints.MATCH_DETAIL, breaker=breaker, match_id=match_id)        
-        return data.get("event") if data else None
+        try:
+            data = self._make_request(SofaScoreEndpoints.MATCH_DETAIL, breaker=breaker, match_id=match_id)        
+            return data
+        except CircuitBreakerError:
+            return None
 
-    def fetch_lineups(self, match_id: int, breaker: Optional[Any] = None) -> Optional[Dict]:
+    def fetch_lineups(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
         """Wrapper để lấy đội hình."""
-        return self._make_request(SofaScoreEndpoints.MATCH_LINEUPS, breaker=breaker, match_id=match_id)
+        try:
+            return self._make_request(SofaScoreEndpoints.MATCH_LINEUPS, breaker=breaker, match_id=match_id)
+        except CircuitBreakerError:
+            return None
 
-    def fetch_statistics(self, match_id: int, breaker: Optional[Any] = None) -> Optional[Dict]:
+    def fetch_statistics(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
         """Wrapper để lấy thống kê."""
-        return self._make_request(SofaScoreEndpoints.MATCH_STATISTICS, breaker=breaker, match_id=match_id)
+        try:
+            return self._make_request(SofaScoreEndpoints.MATCH_STATISTICS, breaker=breaker, match_id=match_id)
+        except CircuitBreakerError:
+            return None
 
-    def fetch_paginated_events(self, endpoint: SofaScoreEndpoints, breaker: Optional[Any] = None, **kwargs) -> List[Dict]:
+    def fetch_incidents(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
+        """Wrapper để lấy các sự kiện (bàn thắng, thẻ phạt, etc.)."""
+        try:
+            # Gọi hàm _make_request với endpoint MATCH_INCIDENTS
+            data = self._make_request(
+                SofaScoreEndpoints.MATCH_INCIDENTS, 
+                breaker=breaker, 
+                match_id=match_id
+            )
+            # Dữ liệu sự kiện nằm trong key 'incidents'
+            return data.get("incidents") if data else None
+        except CircuitBreakerError:
+            return None
+
+    def fetch_paginated_events(self, endpoint: SofaScoreEndpoints, breaker: Optional[CircuitBreaker] = None, **kwargs) -> List[Dict]:
         """Alias for fetch_paginated_data to match orchestrator expectations."""
-        return self.fetch_paginated_data(endpoint, breaker=breaker, **kwargs)
+        items, _ = self.fetch_paginated_data(endpoint, breaker=breaker, **kwargs)
+        return items
 
     def close(self):
         """Đóng session khi hoàn tất."""
