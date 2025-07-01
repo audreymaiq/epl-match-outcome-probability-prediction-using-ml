@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+# ai-engine\elt_pipeline\run_sofascore.py
 
 """
 Trình điều phối (Orchestrator) Tối ưu cho SofaScore Data Pipeline.

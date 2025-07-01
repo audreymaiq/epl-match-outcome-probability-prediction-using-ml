@@ -17,7 +17,7 @@ from dataclasses import is_dataclass, asdict
 # --- Import các thành phần đã được cập nhật ---
 from elt_pipeline.transform.sofascore_transformer import SofaScoreTransformer
 from elt_pipeline.transform.data_structures import ParsedMatch
-from utils.dict_helpers import deep_merge_dicts # <<< BỔ SUNG IMPORT
+from utils.dict_helpers import deep_merge_dicts 
 
 # --- Cấu hình và các hàm Helper (giữ nguyên) ---
 
@@ -74,7 +74,7 @@ def main():
     # --- INPUT ---
     input_dir = get_output_dir()
     matches_summary_file = os.path.join(input_dir, "premier_league_2022-23_matches.json")
-    SPECIFIC_MATCH_ID_TO_TEST = 10385544
+    SPECIFIC_MATCH_ID_TO_TEST = 10385395
 
     logger.info("Đang khởi tạo SofaScoreTransformer...")
     try:

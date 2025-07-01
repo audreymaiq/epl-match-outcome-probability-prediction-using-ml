@@ -40,9 +40,33 @@ class SofaScoreTransformer:
         Khởi tạo Transformer và nạp các bộ quy tắc từ file cấu hình một lần duy nhất.
         """
         logger.info(f"Initializing SofaScoreTransformer for api_type='{api_type}'")
-        self.field_map = get_field_mapping(api_type)
-        self.conversions = get_special_conversions(api_type)
         self.api_type = api_type
+        
+        field_map = get_field_mapping(api_type)
+        self.conversions = get_special_conversions(api_type)
+
+        # === BƯỚC TỰ KIỂM TRA MAPPING ===
+        dest_field_counts = {}
+        for source, dest in field_map.items():
+            dest_field_counts[dest] = dest_field_counts.get(dest, 0) + 1
+        
+        # Tìm tất cả các tên đích bị trùng lặp
+        duplicates = {dest: count for dest, count in dest_field_counts.items() if count > 1}
+        
+        if duplicates:
+            error_messages = []
+            for dest, count in duplicates.items():
+                # Tìm lại tất cả các nguồn đang trỏ đến đích bị trùng
+                sources = [source for source, d in field_map.items() if d == dest]
+                msg = f"Destination field '{dest}' is mapped by {count} sources: {sources}"
+                error_messages.append(msg)
+                logger.error(msg)
+            
+            # Ném ra một lỗi rõ ràng để pipeline dừng lại và báo cho bạn biết
+            raise ValueError(f"Duplicate field mappings detected! {'; '.join(error_messages)}")
+        
+        self.field_map = field_map
+        logger.info("Field mappings validated successfully. No duplicate destinations found.")
 
     def _validate_required_fields(self, flat_data: Dict[str, Any]) -> None:
         """
@@ -86,8 +110,23 @@ class SofaScoreTransformer:
 
         flat_data = {}
         try:
+
+            print("\n--- DEBUG: RAW MATCH DATA (INPUT) ---")
+            import json
+            print(json.dumps(raw_match_data.get('homeScore'), indent=2))
+            print(json.dumps(raw_match_data.get('awayScore'), indent=2))
+            print("---------------------------------------\n")
+
             # BƯỚC 1: ÁP DỤNG MAPPING - Tạo ra một dict phẳng, đã đổi tên
             flat_data = self._apply_mapping_rules(raw_match_data)
+
+            print("\n--- DEBUG: FLAT DATA (OUTPUT) ---")
+            # In ra tất cả các key liên quan đến score
+            score_keys = [k for k in flat_data.keys() if 'goal' in k]
+            for key in score_keys:
+                print(f"{key} from flat_data: {flat_data.get(key)}")
+            print("-----------------------------------\n")
+
             self._validate_required_fields(flat_data)
 
             # BƯỚC 2: TẠO CÁC OBJECT CON (LEAGUE, SEASON, STADIUM, REFEREE)
@@ -217,13 +256,23 @@ class SofaScoreTransformer:
             )
 
             # BƯỚC 6: KIỂM TRA TÍNH NHẤT QUÁN & XỬ LÝ SỰ KIỆN
-            if (match.home_goals is not None and match.away_goals is not None and
-                match.outcome != MatchOutcome.UNKNOWN):
-                
+            if match.home_goals is not None and match.away_goals is not None:
+                # Luôn tính toán kết quả thực tế từ tỷ số
                 actual_outcome = MatchBusinessLogic.determine_outcome_from_score(
                     match.home_goals, match.away_goals
                 )
-                if actual_outcome != match.outcome:
+                
+                # Kịch bản 1: API không cung cấp kết quả, nhưng chúng ta có thể suy ra từ tỷ số
+                if match.outcome == MatchOutcome.UNKNOWN:
+                    logger.info(
+                        f"Match {match.external_id} has no API outcome, but score is available. "
+                        f"Deriving outcome '{actual_outcome.value}' from score {match.home_goals}-{match.away_goals}."
+                    )
+                    match.outcome = actual_outcome
+                    match.outcome_label = MLOutcomeLabels.from_outcome(actual_outcome)
+                    
+                # Kịch bản 2: API cung cấp kết quả, nhưng nó không khớp với tỷ số
+                elif actual_outcome != match.outcome:
                     logger.warning(
                         f"Outcome mismatch for match {match.external_id}: "
                         f"API reports '{match.outcome.value}' but score {match.home_goals}-{match.away_goals} "
