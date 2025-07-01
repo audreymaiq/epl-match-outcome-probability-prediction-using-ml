@@ -1,6 +1,6 @@
 # ai-engine/config/field_mappings.py
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import requests
 import pytz
 from dateutil import parser
@@ -170,6 +170,14 @@ def unified_period_mapper(period: Optional[Union[str, int]], api_type: str = "so
     else:  # api_football
         return API_FOOTBALL_PERIOD_MAPPING.get(period_str)
 
+def unified_match_status_mapper(status: Optional[str], api_type: str = "sofascore") -> Optional[MatchStatus]:
+    """Unified status mapper."""
+    return get_match_status(status, api_type)
+
+def unified_match_outcome_mapper(outcome: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[MatchOutcome]:
+    """Unified outcome mapper."""
+    return get_match_outcome(outcome, api_type)
+
 # Legacy mapper
 period_mapper = safe_mapping(API_FOOTBALL_PERIOD_MAPPING, default=None)
 
@@ -320,32 +328,19 @@ SOFASCORE_FIELD_MAPPING = {
     "season.name": "season_name",
     "season.year": "season_year_str",
 
-    # ========== Match ==========
+    # ========== Match Core & Metadata ==========
     "id": "match_id",
     "startTimestamp": "match_timestamp",
-    "status.code": "status_code",
     "status.description": "status_description",
-    "status.type": "status_type",
     "roundInfo.round": "round",
-    "winnerCode": "outcome_code",  
+    "winnerCode": "outcome_code",
     "attendance": "attendance",
-    "customId": "custom_match_id",
-    "slug": "match_slug",
-    "changeTimestamp": "last_change_timestamp",
-    "currentPeriodStartTimestamp": "current_period_start_timestamp",
-    "finalResultOnly": "final_result_only",
-    "fanRatingEvent": "fan_rating_enabled",
-    "seasonStatisticsType": "season_statistics_type",
-    "hasGlobalHighlights": "has_global_highlights",
     "hasXg": "has_xg",
     "hasEventPlayerStatistics": "has_event_player_statistics",
-    "hasEventPlayerHeatMap": "has_event_player_heat_map",
 
-    # ========== Score ==========
+    # ========== Score Details ==========
     "homeScore.current": "home_goals",
     "awayScore.current": "away_goals",
-    "homeScore.display": "home_goals_display",
-    "awayScore.display": "away_goals_display",
     "homeScore.period1": "half_time_home_goals",
     "awayScore.period1": "half_time_away_goals",
     "homeScore.period2": "second_half_home_goals",
@@ -353,17 +348,9 @@ SOFASCORE_FIELD_MAPPING = {
     "homeScore.normaltime": "home_goals_normaltime",
     "awayScore.normaltime": "away_goals_normaltime",
 
-    # ========== Time ==========
+    # ========== Time Details ==========
     "time.injuryTime1": "injury_time_first_half",
     "time.injuryTime2": "injury_time_second_half",
-    "time.currentPeriodStartTimestamp": "time_current_period_start",
-
-    # ========== Changes Tracking ==========
-    "changes.changeTimestamp": "last_change_timestamp",
-
-    # ========== VAR ==========
-    "varInProgress.homeTeam": "var_home",
-    "varInProgress.awayTeam": "var_away",
 
     # ========== Home Team ==========
     "homeTeam.id": "home_team_id",
@@ -371,109 +358,48 @@ SOFASCORE_FIELD_MAPPING = {
     "homeTeam.shortName": "home_team_short_name",
     "homeTeam.nameCode": "home_team_code",
     "homeTeam.fullName": "home_team_full_name",
-    "homeTeam.foundationDateTimestamp": "home_team_established",  
-    "homeTeam.class": "home_team_class",
-    "homeTeam.disabled": "home_team_disabled",
-    "homeTeam.national": "home_team_national",
-    "homeTeam.type": "home_team_type",
-    
-    # Home Team Manager
-    "homeTeam.manager.name": "home_team_manager",
+    "homeTeam.foundationDateTimestamp": "home_team_established_ts",
+    "homeTeam.userCount": "home_team_fan_count",
+    "homeTeam.manager.name": "home_team_manager_name",
     "homeTeam.manager.id": "home_team_manager_id",
-    "homeTeam.manager.shortName": "home_team_manager_short_name",
     "homeTeam.manager.country.name": "home_team_manager_country",
-    
-    # Home Team Venue
-    "homeTeam.venue.name": "home_team_venue_name",    
-    "homeTeam.venue.city.name": "home_team_venue_city",  
-    "homeTeam.venue.capacity": "home_team_venue_capacity",
     "homeTeam.venue.id": "home_team_venue_id",
-    "homeTeam.venue.slug": "home_team_venue_slug",
-    
-    # Home Team Colors
+    "homeTeam.venue.name": "home_team_venue_name",
+    "homeTeam.venue.city.name": "home_team_venue_city",
+    "homeTeam.venue.capacity": "home_team_venue_capacity",
     "homeTeam.teamColors.primary": "home_team_primary_color",
     "homeTeam.teamColors.secondary": "home_team_secondary_color",
-    "homeTeam.teamColors.text": "home_team_text_color",
-
+    
     # ========== Away Team ==========
     "awayTeam.id": "away_team_id",
     "awayTeam.name": "away_team_name",
     "awayTeam.shortName": "away_team_short_name",
     "awayTeam.nameCode": "away_team_code",
     "awayTeam.fullName": "away_team_full_name",
-    "awayTeam.foundationDateTimestamp": "away_team_established",  
+    "awayTeam.foundationDateTimestamp": "away_team_established_ts",
     "awayTeam.userCount": "away_team_fan_count",
-    "awayTeam.class": "away_team_class",
-    "awayTeam.disabled": "away_team_disabled",
-    "awayTeam.national": "away_team_national",
-    "awayTeam.type": "away_team_type",
-    
-    # Away Team Manager
-    "awayTeam.manager.name": "away_team_manager",
+    "awayTeam.manager.name": "away_team_manager_name",
     "awayTeam.manager.id": "away_team_manager_id",
-    "awayTeam.manager.shortName": "away_team_manager_short_name",
     "awayTeam.manager.country.name": "away_team_manager_country",
-    
-    # Away Team Venue
-    "awayTeam.venue.name": "away_team_venue_name",     
-    "awayTeam.venue.city.name": "away_team_venue_city", 
-    "awayTeam.venue.capacity": "away_team_venue_capacity",
-    "awayTeam.venue.id": "away_team_venue_id",
-    "awayTeam.venue.slug": "away_team_venue_slug",
-    
-    # Away Team Colors
     "awayTeam.teamColors.primary": "away_team_primary_color",
     "awayTeam.teamColors.secondary": "away_team_secondary_color",
-    "awayTeam.teamColors.text": "away_team_text_color",
-
-    # ========== Match Venue (Stadium của trận đấu) ==========
+    
+    # ========== Match Venue ==========
     "venue.id": "match_venue_id",
     "venue.name": "match_venue_name",
     "venue.city.name": "match_venue_city",
     "venue.capacity": "match_venue_capacity",
-    "venue.slug": "match_venue_slug",
-    "venue.hidden": "match_venue_hidden",
     "venue.venueCoordinates.latitude": "match_venue_latitude",
     "venue.venueCoordinates.longitude": "match_venue_longitude",
-    # Venue Stadium nested info
-    "venue.stadium.name": "venue_stadium_name",
-    "venue.stadium.capacity": "venue_stadium_capacity",
 
     # ========== Referee ==========
     "referee.id": "referee_id",
     "referee.name": "referee_name",
-    "referee.slug": "referee_slug",
     "referee.country.name": "referee_country",
-    "referee.yellowCards": "referee_total_yellow_cards", 
-    "referee.redCards": "referee_total_red_cards",      
+    "referee.yellowCards": "referee_total_yellow_cards",
+    "referee.redCards": "referee_total_red_cards",
     "referee.yellowRedCards": "referee_total_yellow_red_cards",
-    "referee.games": "referee_total_games",         
-
-    # ========== Player (for events) ==========
-    "player.id": "player_id",
-    "player.name": "player_name",
-    "player.dateOfBirthTimestamp": "date_of_birth_timestamp",
-    "player.country.name": "nationality",
-    "player.position": "position_code",
-
-    # ========== Statistics ==========
-    "statistics.goals": "goals",
-    "statistics.assists": "assists",
-    "statistics.minutesPlayed": "minutes_played",
-    "statistics.totalShots": "shots",
-    "statistics.shotsOnTarget": "shots_on_target",
-    "statistics.totalPasses": "passes",
-    "statistics.accuratePasses": "accurate_passes",
-    "statistics.passAccuracy": "passes_accuracy",
-    "statistics.tackles": "tackles",
-    "statistics.duelsWon": "duels_won",
-    "statistics.foulsCommitted": "fouls_committed",
-    "statistics.yellowCards": "yellow_cards",
-    "statistics.redCards": "red_cards",
-    # Team statistics
-    "statistics.ballPossession": "possession_percent",
-    "statistics.cornerKicks": "corner_kicks",
-    "statistics.offsides": "offsides",
+    "referee.games": "referee_total_games",
 }
 
 def get_field_mapping(api_type: str = "sofascore") -> Dict[str, str]:
@@ -490,21 +416,29 @@ FIELD_MAPPING = API_FOOTBALL_FIELD_MAPPING
 # CONVERSION FUNCTIONS - Enhanced
 # =============================================================================
 
-def convert_birthdate(birth_input: Union[str, int, None]) -> Optional[date]:
-    """Convert birth date from string or timestamp to date object"""
-    if not birth_input:
+def convert_birthdate(birth_input: Union[str, int, float, None]) -> Optional[date]:
+    """
+    Convert birth date from string or timestamp to date object.
+    """
+    if birth_input is None:
         return None
     
     try:
         # Handle timestamp (SofaScore format)
         if isinstance(birth_input, (int, float)):
-            return datetime.fromtimestamp(birth_input, tz=pytz.UTC).date()
+            # CÁCH TIẾP CẬN AN TOÀN CHO MỌI HỆ ĐIỀU HÀNH
+            # Epoch (mốc thời gian) là 1970-01-01 00:00:00 UTC
+            epoch = datetime(1970, 1, 1, tzinfo=pytz.UTC)
+            # Cộng/trừ số giây từ mốc thời gian
+            return (epoch + timedelta(seconds=birth_input)).date()
         
         # Handle string (API-Football format)
         if isinstance(birth_input, str):
+            # dateutil.parser đã đủ mạnh để xử lý hầu hết các định dạng
             return parser.isoparse(birth_input).date()
             
-    except (ValueError, TypeError, OSError) as e:
+    except (ValueError, TypeError, OverflowError) as e:
+        # OverflowError có thể xảy ra với timedelta nếu timestamp quá lớn/nhỏ
         logger.warning(f"Failed to convert birthdate '{birth_input}': {e}")
         return None
     
@@ -584,10 +518,7 @@ API_FOOTBALL_SPECIAL_CONVERSIONS = {
 
 # SofaScore special conversions
 SOFASCORE_SPECIAL_CONVERSIONS = {
-    "player.dateOfBirthTimestamp": convert_timestamp_to_date,
     "startTimestamp": convert_datetime,
-    "statistics.passAccuracy": convert_accuracy,
-    "statistics.ballPossession": convert_possession_percent,
     "homeTeam.foundationDateTimestamp": convert_birthdate,
     "awayTeam.foundationDateTimestamp": convert_birthdate,
     "player.dateOfBirthTimestamp": convert_birthdate,

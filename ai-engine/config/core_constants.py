@@ -2,6 +2,10 @@
 
 from typing import Optional, Dict, Union
 from enum import Enum
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class MatchStatus(str, Enum):
     SCHEDULED = "SCHEDULED"
@@ -32,6 +36,31 @@ class PlayerStatus(str, Enum):
     INJURED = "Injured"
     SUSPENDED = "Suspended"
     UNKNOWN = "Unknown"
+
+class MatchEventType(str, Enum):
+    GOAL = 'goal'
+    OWN_GOAL = 'own_goal'
+    PENALTY_GOAL = 'penalty_goal'
+    MISSED_PENALTY = 'missed_penalty'
+    YELLOW_CARD = 'yellow card'
+    RED_CARD = 'red card'
+    SUBSTITUTION = 'substitution'
+    VAR_DECISION = 'var_decision'
+    GOAL_CANCELLED = 'goal_cancelled'
+    PENALTY_CONFIRMED = 'penalty_confirmed'
+    INJURY = 'injury'
+    CORNER_KICK = 'corner_kick'
+    FREE_KICK = 'free_kick'
+    OFFSIDE = 'offside'
+    UNKNOWN = 'Unknown'
+
+class MatchPeriod(str, Enum):
+    FIRST_HALF = '1H'
+    SECOND_HALF = '2H'
+    EXTRA_TIME_1 = 'ET1'
+    EXTRA_TIME_2 = 'ET2'
+    PENALTIES = 'PEN'
+    UNKNOWN = 'Unknown'
 
 # --- Dictionaries Mapping từ API về hằng số chuẩn hóa ---
 
@@ -71,6 +100,65 @@ SOFASCORE_STATUS_MAPPING = {
     "abandoned": MatchStatus.ABANDONED
 }
 
+# SofaScore position mapping - keys normalized to lowercase
+SOFASCORE_POSITION_MAPPING = {
+    "g": PlayerPosition.GK,
+    "d": PlayerPosition.DEF,
+    "m": PlayerPosition.MID,
+    "f": PlayerPosition.FWD,
+    "goalkeeper": PlayerPosition.GK,
+    "defender": PlayerPosition.DEF,
+    "midfielder": PlayerPosition.MID,
+    "forward": PlayerPosition.FWD,
+    "attacker": PlayerPosition.FWD
+}
+
+# SofaScore outcome mapping - keys normalized to string
+SOFASCORE_OUTCOME_MAPPING = {
+    "1": MatchOutcome.HOME,
+    "2": MatchOutcome.AWAY,
+    "0": MatchOutcome.DRAW,
+    "3": MatchOutcome.DRAW,
+    "home": MatchOutcome.HOME,
+    "away": MatchOutcome.AWAY,
+    "draw": MatchOutcome.DRAW
+}
+
+# SofaScore player availability mapping
+SOFASCORE_PLAYER_AVAILABILITY_MAPPING = {
+    "missing": PlayerStatus.MISSING_FIXTURE,
+    "questionable": PlayerStatus.QUESTIONABLE,
+    "injured": PlayerStatus.INJURED,
+    "suspended": PlayerStatus.SUSPENDED,
+    "doubt": PlayerStatus.QUESTIONABLE
+}
+
+SOFASCORE_EVENT_MAPPING = {
+    "goal": MatchEventType.GOAL,
+    "ownGoal": MatchEventType.OWN_GOAL,
+    "penalty": MatchEventType.PENALTY_GOAL,
+    "penaltyMissed": MatchEventType.MISSED_PENALTY,
+    "yellowCard": MatchEventType.YELLOW_CARD,
+    "redCard": MatchEventType.RED_CARD,
+    "secondYellow": MatchEventType.RED_CARD, # secondYellow cũng là thẻ đỏ
+    "substitution": MatchEventType.SUBSTITUTION,
+    "varDecision": MatchEventType.VAR_DECISION,
+    "goalCancelled": MatchEventType.GOAL_CANCELLED,
+    "penaltyAwarded": MatchEventType.PENALTY_CONFIRMED,
+    "injury": MatchEventType.INJURY,
+    "cornerKick": MatchEventType.CORNER_KICK,
+    "freeKick": MatchEventType.FREE_KICK,
+    "offside": MatchEventType.OFFSIDE
+}
+
+SOFASCORE_PERIOD_MAPPING = {
+    "1": MatchPeriod.FIRST_HALF,
+    "2": MatchPeriod.SECOND_HALF,
+    "3": MatchPeriod.EXTRA_TIME_1,
+    "4": MatchPeriod.EXTRA_TIME_2,
+    "5": MatchPeriod.PENALTIES
+}
+
 # Legacy API-Football mapping (kept for reference/migration)
 API_FOOTBALL_STATUS_MAPPING = {
     # Scheduled statuses
@@ -105,17 +193,11 @@ API_FOOTBALL_STATUS_MAPPING = {
     "ABD": MatchStatus.ABANDONED    # Abandoned
 }
 
-# SofaScore position mapping - keys normalized to lowercase
-SOFASCORE_POSITION_MAPPING = {
-    "g": PlayerPosition.GK,
-    "d": PlayerPosition.DEF,
-    "m": PlayerPosition.MID,
-    "f": PlayerPosition.FWD,
-    "goalkeeper": PlayerPosition.GK,
-    "defender": PlayerPosition.DEF,
-    "midfielder": PlayerPosition.MID,
-    "forward": PlayerPosition.FWD,
-    "attacker": PlayerPosition.FWD
+# Legacy API-Football outcome mapping - keys normalized to lowercase
+API_FOOTBALL_OUTCOME_MAPPING = {
+    "home": MatchOutcome.HOME,
+    "draw": MatchOutcome.DRAW,
+    "away": MatchOutcome.AWAY
 }
 
 # Legacy API-Football position mapping - keys normalized to lowercase
@@ -124,33 +206,6 @@ API_FOOTBALL_POSITION_MAPPING = {
     "defender": PlayerPosition.DEF,
     "midfielder": PlayerPosition.MID,
     "attacker": PlayerPosition.FWD
-}
-
-# SofaScore outcome mapping - keys normalized to string
-SOFASCORE_OUTCOME_MAPPING = {
-    "1": MatchOutcome.HOME,
-    "2": MatchOutcome.AWAY,
-    "0": MatchOutcome.DRAW,
-    "3": MatchOutcome.DRAW,
-    "home": MatchOutcome.HOME,
-    "away": MatchOutcome.AWAY,
-    "draw": MatchOutcome.DRAW
-}
-
-# Legacy API-Football outcome mapping - keys normalized to lowercase
-API_FOOTBALL_OUTCOME_MAPPING = {
-    "home": MatchOutcome.HOME,
-    "draw": MatchOutcome.DRAW,
-    "away": MatchOutcome.AWAY
-}
-
-# SofaScore player availability mapping
-SOFASCORE_PLAYER_AVAILABILITY_MAPPING = {
-    "missing": PlayerStatus.MISSING_FIXTURE,
-    "questionable": PlayerStatus.QUESTIONABLE,
-    "injured": PlayerStatus.INJURED,
-    "suspended": PlayerStatus.SUSPENDED,
-    "doubt": PlayerStatus.QUESTIONABLE
 }
 
 # Legacy API-Football player availability mapping
@@ -221,6 +276,29 @@ def get_player_availability(api_status: Optional[str], api_type: str = "sofascor
     elif api_type == "api_football":
         return API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING.get(normalized_status)
     
+    return None
+
+# Hàm dịch cho Event Type
+def get_event_type(api_event_type: Optional[str], api_type: str = "sofascore") -> Optional[MatchEventType]:
+    """Nhận loại sự kiện từ API và trả về Enum chuẩn hóa."""
+    if not isinstance(api_event_type, str) or not api_event_type.strip(): return None
+    if api_type == "sofascore":
+        result = SOFASCORE_EVENT_MAPPING.get(api_event_type)
+        if not result:
+            logger.debug(f"Unknown SofaScore event type: '{api_event_type}'")
+        return result
+    return None
+
+#  Hàm dịch cho Match Period
+def get_match_period(api_period: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[MatchPeriod]:
+    """Nhận hiệp đấu từ API và trả về Enum chuẩn hóa."""
+    if api_period is None: return None
+    normalized_period = str(api_period)
+    if api_type == "sofascore":
+        result = SOFASCORE_PERIOD_MAPPING.get(normalized_period)
+        if not result:
+            logger.debug(f"Unknown SofaScore period: '{api_period}'")
+        return result
     return None
 
 # --- Các hằng số khác không liên quan trực tiếp đến schema ENUMs ---

@@ -1,7 +1,7 @@
 # ai-engine/config/business_constants.py
 
 from enum import Enum
-from typing import List, Tuple, FrozenSet, Dict, Any, Optional, Union
+from typing import List, Tuple, FrozenSet, Dict, Any, Optional, Union, TYPE_CHECKING
 from functools import lru_cache
 from datetime import datetime, timedelta
 import pytz
@@ -9,6 +9,9 @@ import re
 
 from config.settings import get_config
 from .core_constants import PlayerPosition, MatchStatus, MatchOutcome
+
+if TYPE_CHECKING:
+    from elt_pipeline.transform.data_structures import ParsedTeam, ParsedReferee
 
 import logging
 logger = logging.getLogger(__name__)
@@ -50,11 +53,15 @@ class TeamPerformanceCategory(Enum):
     POOR = "poor"
     VERY_POOR = "very_poor"
 
+class RefereeStyle(Enum):
+    """Phân loại phong cách của trọng tài dựa trên thống kê."""
+    LENIENT = "Lenient"      # Ít thẻ
+    AVERAGE = "Average"      # Trung bình
+    STRICT = "Strict"        # Nhiều thẻ
+    UNKNOWN = "Unknown"      # Chưa đủ dữ liệu
+
 # ======================== MATCH STATUSES ========================
 MatchStatusCategory = MatchStatus
-
-# ======================== PLAYER POSITIONS ========================
-# POSITION_MAPPING = API_POSITION_MAPPING
 
 # ======================== ENTITY TYPES ========================
 VALID_ENTITY_TYPES: FrozenSet[str] = frozenset({
@@ -154,6 +161,13 @@ def decode_match_status(label: int) -> str:
     """Decode numeric label to match status"""
     return STATUS_LABELS_REVERSE.get(label, MatchStatus.UNKNOWN)
 
+def categorize_team_performance(points_per_game: float) -> TeamPerformanceCategory:
+    """Categorize team performance based on points per game"""
+    for category, threshold in PERFORMANCE_THRESHOLDS.items():
+        if points_per_game >= threshold:
+            return category
+    return TeamPerformanceCategory.VERY_POOR
+
 # Complete label mapping API with enhanced error handling
 LABEL_MAPPERS: Dict[str, Dict[str, Any]] = {
     "match_outcome": {
@@ -210,13 +224,6 @@ PERFORMANCE_THRESHOLDS = {
     TeamPerformanceCategory.POOR: 1.0,       # 38+ points
     TeamPerformanceCategory.VERY_POOR: 0.0   # Below 38 points
 }
-
-def categorize_team_performance(points_per_game: float) -> TeamPerformanceCategory:
-    """Categorize team performance based on points per game"""
-    for category, threshold in PERFORMANCE_THRESHOLDS.items():
-        if points_per_game >= threshold:
-            return category
-    return TeamPerformanceCategory.VERY_POOR
 
 # ======================== LEAGUE CONSTANTS ========================
 PREMIER_LEAGUE_TEAMS = 20
@@ -480,28 +487,41 @@ class MatchBusinessLogic:
     """Logic nghiệp vụ liên quan đến trận đấu"""
     
     @staticmethod
-    def determine_match_importance(home_team: str, away_team: str) -> MatchImportance:
-        """Xác định mức độ quan trọng của trận đấu"""
+    def determine_match_importance(
+        home_team: 'ParsedTeam', 
+        away_team: 'ParsedTeam',
+        # Thêm các tham số tùy chọn để logic thông minh hơn
+        home_team_rank: Optional[int] = None, 
+        away_team_rank: Optional[int] = None
+    ) -> MatchImportance:
+        """
+        Xác định mức độ quan trọng của trận đấu.
+        NÂNG CẤP: Sử dụng thêm thông tin về đội bóng.
+        """
+        home_name = home_team.name
+        away_name = away_team.name
         
-        # Check if it's a derby
+        # 1. Các trận Derby luôn có độ quan trọng cao nhất
         for derby_name, teams in BusinessRules.DERBY_MATCHES.items():
-            if home_team in teams and away_team in teams:
+            if home_name in teams and away_name in teams:
                 return MatchImportance.HIGH
         
-        # Check if both teams are Big Six
-        both_big_six = (
-            home_team in BusinessRules.BIG_SIX_TEAMS and 
-            away_team in BusinessRules.BIG_SIX_TEAMS
-        )
-        if both_big_six:
+        # 2. Các trận đấu của Big Six với nhau
+        is_home_big_six = home_name in BusinessRules.BIG_SIX_TEAMS
+        is_away_big_six = away_name in BusinessRules.BIG_SIX_TEAMS
+        if is_home_big_six and is_away_big_six:
             return MatchImportance.HIGH
+            
+        # 3. Trận đấu quyết định ngôi vô địch hoặc top 4 (giả định có rank)
+        if home_team_rank and away_team_rank:
+            if home_team_rank <= 4 and away_team_rank <= 4:
+                return MatchImportance.HIGH
+            # Trận đấu trụ hạng
+            if home_team_rank >= 18 and away_team_rank >= 18:
+                return MatchImportance.HIGH
         
-        # One team is Big Six
-        one_big_six = (
-            home_team in BusinessRules.BIG_SIX_TEAMS or 
-            away_team in BusinessRules.BIG_SIX_TEAMS
-        )
-        if one_big_six:
+        # 4. Big Six đá với đội khác
+        if is_home_big_six or is_away_big_six:
             return MatchImportance.MEDIUM
         
         return MatchImportance.LOW
@@ -539,6 +559,18 @@ class MatchBusinessLogic:
         """Kiểm tra có phải thắng đậm không"""
         return (goals_for - goals_against) >= AnalyticsConstants.BIG_WIN_GOAL_DIFFERENCE
 
+    @staticmethod
+    def determine_outcome_from_score(home_goals: int, away_goals: int) -> MatchOutcome:
+        """
+        Suy luận MatchOutcome từ tỷ số trận đấu.
+        """
+        if home_goals > away_goals:
+            return MatchOutcome.HOME
+        elif home_goals < away_goals:
+            return MatchOutcome.AWAY
+        else:
+            return MatchOutcome.DRAW    
+
 # ======================== VALIDATION RULES ========================
 class ValidationRules:
     """Các quy tắc validation dữ liệu"""
@@ -572,6 +604,58 @@ class ValidationRules:
         
         # Should not be empty after stripping
         return len(team_name.strip()) > 0
+
+# BỔ SUNG: LỚP LOGIC CHO TRỌNG TÀI ---
+class RefereeBusinessLogic:
+    """Logic nghiệp vụ liên quan đến trọng tài."""
+    
+    # Ngưỡng để phân loại, có thể đưa ra config nếu cần
+    MIN_GAMES_FOR_STATS = 20
+    STRICT_YELLOW_CARD_RATE = 4.0  # Thẻ vàng/trận
+    LENIENT_YELLOW_CARD_RATE = 3.2
+
+    @classmethod
+    def categorize_style(cls, referee: 'ParsedReferee') -> RefereeStyle:
+        """
+        Phân loại phong cách của trọng tài dựa trên thống kê lịch sử của họ.
+        Đây là một ví dụ về Feature Enrichment.
+        """
+        if (not referee.total_games_officiated or 
+            referee.total_games_officiated < cls.MIN_GAMES_FOR_STATS or
+            referee.total_yellow_cards is None):
+            return RefereeStyle.UNKNOWN
+
+        try:
+            yellows_per_game = referee.total_yellow_cards / referee.total_games_officiated
+            
+            if yellows_per_game >= cls.STRICT_YELLOW_CARD_RATE:
+                return RefereeStyle.STRICT
+            elif yellows_per_game <= cls.LENIENT_YELLOW_CARD_RATE:
+                return RefereeStyle.LENIENT
+            else:
+                return RefereeStyle.AVERAGE
+        except (TypeError, ZeroDivisionError):
+            return RefereeStyle.UNKNOWN
+
+# LỚP LOGIC CHO ĐỘI BÓNG ---
+class TeamBusinessLogic:
+    """Logic nghiệp vụ liên quan đến đội bóng."""
+
+    @staticmethod
+    def categorize_team(team: 'ParsedTeam') -> TeamCategory:
+        """
+        Phân loại một đội bóng (ví dụ cho mục đích phân tích).
+        Hiện tại dựa trên các quy tắc cứng, có thể mở rộng với dữ liệu thống kê.
+        """
+        if team.name in BusinessRules.BIG_SIX_TEAMS:
+            return TeamCategory.BIG_SIX
+        
+        # Logic này có thể được mở rộng rất nhiều
+        # Ví dụ: nếu có dữ liệu về mùa giải trước
+        # if team.previous_season_position <= 10:
+        #     return TeamCategory.ESTABLISHED
+        
+        return TeamCategory.UNKNOWN
 
 # ======================== UTILITY FUNCTIONS ========================
 def format_season(start_year: int, end_year: int) -> str:
