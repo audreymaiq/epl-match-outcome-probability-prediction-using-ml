@@ -1,5 +1,7 @@
+# ai-engine\scripts\test\test_extractor.py
+
 # --- Bước 1: Thiết lập môi trường NGAY TỪ ĐẦU ---
-from scripts._test_helper import setup_test_environment
+from scripts.test._test_helper import setup_test_environment
 setup_test_environment()
 # ----------------------------------------------------
 
@@ -26,7 +28,7 @@ def setup_logging():
     logging.getLogger("curl_cffi").setLevel(logging.WARNING)
 
 #  Hàm helper để lưu file JSON ---
-def save_to_json(data, filename, output_dir="output"):
+def save_to_json(data, filename, output_dir="scripts/test/output_test"):
     """Lưu dữ liệu vào file JSON trong một thư mục chỉ định."""
     try:
         # Tạo thư mục output nếu chưa tồn tại

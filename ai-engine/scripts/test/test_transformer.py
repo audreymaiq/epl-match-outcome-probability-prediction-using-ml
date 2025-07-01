@@ -1,4 +1,4 @@
-# scripts/test_transformer.py
+# ai-engine\scripts\test\test_transformer.py
 
 # --- Bước 1: Thiết lập môi trường NGAY TỪ ĐẦU ---
 # Đảm bảo các import từ các thư mục khác hoạt động

@@ -1,4 +1,4 @@
-# scripts/test_settings.py
+# ai-engine\scripts\test\test_settings_db_connector.py
 
 import os
 import sys

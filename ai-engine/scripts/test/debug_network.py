@@ -1,4 +1,4 @@
-# file: debug_network.py
+# ai-engine\scripts\test\debug_network.py
 
 import sys
 from curl_cffi.requests import Session, RequestsError
