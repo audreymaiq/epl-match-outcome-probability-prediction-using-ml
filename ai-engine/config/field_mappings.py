@@ -310,39 +310,153 @@ API_FOOTBALL_FIELD_MAPPING = {
 
 # SofaScore field mapping
 SOFASCORE_FIELD_MAPPING = {
-    # Tournament and Season
+    # ========== Tournament and Season ==========
     "tournament.id": "league_id",
     "tournament.name": "league_name",
     "tournament.category.name": "league_country",
+    "tournament.uniqueTournament.id": "unique_tournament_id",
+    "tournament.priority": "tournament_priority",
     "season.id": "season_id",
     "season.name": "season_name",
     "season.year": "season_year_str",
-    # Team
-    "homeTeam.id": "home_team_id",
-    "homeTeam.name": "home_team_name",
-    "awayTeam.id": "away_team_id",
-    "awayTeam.name": "away_team_name",
-    # Match
+
+    # ========== Match ==========
     "id": "match_id",
     "startTimestamp": "match_timestamp",
     "status.code": "status_code",
     "status.description": "status_description",
+    "status.type": "status_type",
     "roundInfo.round": "round",
-    # Score
+    "winnerCode": "outcome_code",  
+    "attendance": "attendance",
+    "customId": "custom_match_id",
+    "slug": "match_slug",
+    "changeTimestamp": "last_change_timestamp",
+    "currentPeriodStartTimestamp": "current_period_start_timestamp",
+    "finalResultOnly": "final_result_only",
+    "fanRatingEvent": "fan_rating_enabled",
+    "seasonStatisticsType": "season_statistics_type",
+    "hasGlobalHighlights": "has_global_highlights",
+    "hasXg": "has_xg",
+    "hasEventPlayerStatistics": "has_event_player_statistics",
+    "hasEventPlayerHeatMap": "has_event_player_heat_map",
+
+    # ========== Score ==========
     "homeScore.current": "home_goals",
     "awayScore.current": "away_goals",
+    "homeScore.display": "home_goals_display",
+    "awayScore.display": "away_goals_display",
     "homeScore.period1": "half_time_home_goals",
     "awayScore.period1": "half_time_away_goals",
-    # Player
+    "homeScore.period2": "second_half_home_goals",
+    "awayScore.period2": "second_half_away_goals",
+    "homeScore.normaltime": "home_goals_normaltime",
+    "awayScore.normaltime": "away_goals_normaltime",
+
+    # ========== Time ==========
+    "time.injuryTime1": "injury_time_first_half",
+    "time.injuryTime2": "injury_time_second_half",
+    "time.currentPeriodStartTimestamp": "time_current_period_start",
+
+    # ========== Changes Tracking ==========
+    "changes.changeTimestamp": "last_change_timestamp",
+
+    # ========== VAR ==========
+    "varInProgress.homeTeam": "var_home",
+    "varInProgress.awayTeam": "var_away",
+
+    # ========== Home Team ==========
+    "homeTeam.id": "home_team_id",
+    "homeTeam.name": "home_team_name",
+    "homeTeam.shortName": "home_team_short_name",
+    "homeTeam.nameCode": "home_team_code",
+    "homeTeam.fullName": "home_team_full_name",
+    "homeTeam.foundationDateTimestamp": "home_team_established",  
+    "homeTeam.class": "home_team_class",
+    "homeTeam.disabled": "home_team_disabled",
+    "homeTeam.national": "home_team_national",
+    "homeTeam.type": "home_team_type",
+    
+    # Home Team Manager
+    "homeTeam.manager.name": "home_team_manager",
+    "homeTeam.manager.id": "home_team_manager_id",
+    "homeTeam.manager.shortName": "home_team_manager_short_name",
+    "homeTeam.manager.country.name": "home_team_manager_country",
+    
+    # Home Team Venue
+    "homeTeam.venue.name": "home_team_venue_name",    
+    "homeTeam.venue.city.name": "home_team_venue_city",  
+    "homeTeam.venue.capacity": "home_team_venue_capacity",
+    "homeTeam.venue.id": "home_team_venue_id",
+    "homeTeam.venue.slug": "home_team_venue_slug",
+    
+    # Home Team Colors
+    "homeTeam.teamColors.primary": "home_team_primary_color",
+    "homeTeam.teamColors.secondary": "home_team_secondary_color",
+    "homeTeam.teamColors.text": "home_team_text_color",
+
+    # ========== Away Team ==========
+    "awayTeam.id": "away_team_id",
+    "awayTeam.name": "away_team_name",
+    "awayTeam.shortName": "away_team_short_name",
+    "awayTeam.nameCode": "away_team_code",
+    "awayTeam.fullName": "away_team_full_name",
+    "awayTeam.foundationDateTimestamp": "away_team_established",  
+    "awayTeam.userCount": "away_team_fan_count",
+    "awayTeam.class": "away_team_class",
+    "awayTeam.disabled": "away_team_disabled",
+    "awayTeam.national": "away_team_national",
+    "awayTeam.type": "away_team_type",
+    
+    # Away Team Manager
+    "awayTeam.manager.name": "away_team_manager",
+    "awayTeam.manager.id": "away_team_manager_id",
+    "awayTeam.manager.shortName": "away_team_manager_short_name",
+    "awayTeam.manager.country.name": "away_team_manager_country",
+    
+    # Away Team Venue
+    "awayTeam.venue.name": "away_team_venue_name",     
+    "awayTeam.venue.city.name": "away_team_venue_city", 
+    "awayTeam.venue.capacity": "away_team_venue_capacity",
+    "awayTeam.venue.id": "away_team_venue_id",
+    "awayTeam.venue.slug": "away_team_venue_slug",
+    
+    # Away Team Colors
+    "awayTeam.teamColors.primary": "away_team_primary_color",
+    "awayTeam.teamColors.secondary": "away_team_secondary_color",
+    "awayTeam.teamColors.text": "away_team_text_color",
+
+    # ========== Match Venue (Stadium của trận đấu) ==========
+    "venue.id": "match_venue_id",
+    "venue.name": "match_venue_name",
+    "venue.city.name": "match_venue_city",
+    "venue.capacity": "match_venue_capacity",
+    "venue.slug": "match_venue_slug",
+    "venue.hidden": "match_venue_hidden",
+    "venue.venueCoordinates.latitude": "match_venue_latitude",
+    "venue.venueCoordinates.longitude": "match_venue_longitude",
+    # Venue Stadium nested info
+    "venue.stadium.name": "venue_stadium_name",
+    "venue.stadium.capacity": "venue_stadium_capacity",
+
+    # ========== Referee ==========
+    "referee.id": "referee_id",
+    "referee.name": "referee_name",
+    "referee.slug": "referee_slug",
+    "referee.country.name": "referee_country",
+    "referee.yellowCards": "referee_total_yellow_cards", 
+    "referee.redCards": "referee_total_red_cards",      
+    "referee.yellowRedCards": "referee_total_yellow_red_cards",
+    "referee.games": "referee_total_games",         
+
+    # ========== Player (for events) ==========
     "player.id": "player_id",
     "player.name": "player_name",
     "player.dateOfBirthTimestamp": "date_of_birth_timestamp",
     "player.country.name": "nationality",
     "player.position": "position_code",
-    # Referee
-    "referee.id": "referee_id",
-    "referee.name": "referee_name", 
-    # Statistics
+
+    # ========== Statistics ==========
     "statistics.goals": "goals",
     "statistics.assists": "assists",
     "statistics.minutesPlayed": "minutes_played",
@@ -360,11 +474,6 @@ SOFASCORE_FIELD_MAPPING = {
     "statistics.ballPossession": "possession_percent",
     "statistics.cornerKicks": "corner_kicks",
     "statistics.offsides": "offsides",
-    # Venue
-    "venue.id": "venue_id",
-    "venue.name": "venue_name",
-    "venue.capacity": "venue_capacity",
-    "venue.city.name": "venue_city"
 }
 
 def get_field_mapping(api_type: str = "sofascore") -> Dict[str, str]:
@@ -478,7 +587,10 @@ SOFASCORE_SPECIAL_CONVERSIONS = {
     "player.dateOfBirthTimestamp": convert_timestamp_to_date,
     "startTimestamp": convert_datetime,
     "statistics.passAccuracy": convert_accuracy,
-    "statistics.ballPossession": convert_possession_percent
+    "statistics.ballPossession": convert_possession_percent,
+    "homeTeam.foundationDateTimestamp": convert_birthdate,
+    "awayTeam.foundationDateTimestamp": convert_birthdate,
+    "player.dateOfBirthTimestamp": convert_birthdate,
 }
 
 def get_special_conversions(api_type: str = "sofascore") -> Dict[str, Callable]:

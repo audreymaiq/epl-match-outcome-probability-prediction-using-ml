@@ -60,10 +60,10 @@
                 }
             },
             "userCount": 1248792,
-            "hasPerformanceGraphFeature": false,
+            "hasPerformanceGraphFeature": true,
             "id": 17,
             "country": {},
-            "hasEventPlayerStatistics": true,
+            "hasEventPlayerStatistics": false,
             "displayInverseHomeAwayTeams": false,
             "fieldTranslations": {
                 "nameTranslation": {
@@ -74,8 +74,8 @@
                 "shortNameTranslation": {}
             }
         },
-        "priority": 683,
-        "isGroup": true,
+        "priority": 678,
+        "isGroup": false,
         "competitionType": 1,
         "isLive": false,
         "id": 1,
@@ -96,29 +96,29 @@
         "id": 41886
     },
     "roundInfo": {
-        "round": 20
+        "round": 28
     },
-    "customId": "IsT",
+    "customId": "IK",
     "status": {
         "code": 100,
         "description": "Ended",
         "type": "finished"
     },
-    "winnerCode": 1,
-    "attendance": 52247,
+    "winnerCode": 3,
+    "attendance": 30157,
     "venue": {
         "city": {
-            "name": "Newcastle upon Tyne"
+            "name": "Southampton"
         },
         "venueCoordinates": {
-            "latitude": 54.975469,
-            "longitude": -1.621874
+            "latitude": 50.905862,
+            "longitude": -1.390877
         },
         "hidden": false,
-        "slug": "st-james-park",
-        "name": "St James' Park",
-        "capacity": 52409,
-        "id": 765,
+        "slug": "st-mary-s-stadium",
+        "name": "St. Mary's Stadium",
+        "capacity": 32384,
+        "id": 2231,
         "country": {
             "alpha2": "EN",
             "alpha3": "ENG",
@@ -127,30 +127,30 @@
         },
         "fieldTranslations": {
             "nameTranslation": {
-                "ar": "بارك سانت جيمس",
-                "hi": "सेंट जेम्स पार्क",
-                "bn": "সেন্ট জেমস পার্ক"
+                "ar": "ملعب سانت ماري",
+                "hi": "सेंट मैरी स्टेडियम",
+                "bn": "সেন্ট মেরির স্টেডিয়াম"
             },
             "shortNameTranslation": {}
         },
         "stadium": {
-            "name": "St James' Park",
-            "capacity": 52409
+            "name": "St. Mary's Stadium",
+            "capacity": 32384
         }
     },
     "referee": {
-        "name": "Robert Jones",
-        "slug": "robert-jones",
-        "yellowCards": 1014,
-        "redCards": 20,
-        "yellowRedCards": 13,
-        "games": 288,
+        "name": "Simon Hooper",
+        "slug": "simon-hooper",
+        "yellowCards": 1389,
+        "redCards": 15,
+        "yellowRedCards": 19,
+        "games": 413,
         "sport": {
             "id": 1,
             "slug": "football",
             "name": "Football"
         },
-        "id": 74264,
+        "id": 79902,
         "country": {
             "alpha2": "EN",
             "alpha3": "ENG",
@@ -159,61 +159,61 @@
         },
         "fieldTranslations": {
             "nameTranslation": {
-                "ar": "روبرت جونز",
-                "hi": "रॉबर्ट जोन्स",
-                "bn": "রবার্ট জোন্স"
+                "ar": "سايمون هوبر",
+                "hi": "साइमन हूपर",
+                "bn": "সাইমন হুপার"
             },
             "shortNameTranslation": {}
         }
     },
     "homeTeam": {
-        "name": "Newcastle United",
-        "slug": "newcastle-united",
-        "shortName": "Newcastle",
+        "name": "Southampton",
+        "slug": "southampton",
+        "shortName": "Southampton",
         "gender": "M",
         "sport": {
             "name": "Football",
             "slug": "football",
             "id": 1
         },
-        "userCount": 951426,
+        "userCount": 203899,
         "manager": {
-            "name": "Eddie Howe",
-            "slug": "eddie-howe",
-            "shortName": "E. Howe",
-            "id": 19618,
+            "name": "Will Still",
+            "slug": "will-still",
+            "shortName": "W. Still",
+            "id": 789154,
             "country": {
-                "alpha2": "EN",
-                "alpha3": "ENG",
-                "name": "England",
-                "slug": "england"
+                "alpha2": "BE",
+                "alpha3": "BEL",
+                "name": "Belgium",
+                "slug": "belgium"
             },
             "fieldTranslations": {
                 "nameTranslation": {
-                    "ar": "إيدي هاو",
-                    "hi": "एडी होवे",
-                    "bn": "এডি হো"
+                    "ar": "ويل ستيل",
+                    "hi": "विल स्टिल",
+                    "bn": "উইল স্টিল"
                 },
                 "shortNameTranslation": {
-                    "ar": "إ. هاو",
-                    "hi": "ई. होवे",
-                    "bn": "ই. হো"
+                    "ar": "و. ستيل",
+                    "hi": "डब्ल्यू. स्टिल",
+                    "bn": "ডব্লিউ. এখনও"
                 }
             }
         },
         "venue": {
             "city": {
-                "name": "Newcastle upon Tyne"
+                "name": "Southampton"
             },
             "venueCoordinates": {
-                "latitude": 54.975469,
-                "longitude": -1.621874
+                "latitude": 50.905862,
+                "longitude": -1.390877
             },
             "hidden": false,
-            "slug": "st-james-park",
-            "name": "St James' Park",
-            "capacity": 52409,
-            "id": 765,
+            "slug": "st-mary-s-stadium",
+            "name": "St. Mary's Stadium",
+            "capacity": 32384,
+            "id": 2231,
             "country": {
                 "alpha2": "EN",
                 "alpha3": "ENG",
@@ -222,83 +222,80 @@
             },
             "fieldTranslations": {
                 "nameTranslation": {
-                    "ar": "بارك سانت جيمس",
-                    "hi": "सेंट जेम्स पार्क",
-                    "bn": "সেন্ট জেমস পার্ক"
+                    "ar": "ملعب سانت ماري",
+                    "hi": "सेंट मैरी स्टेडियम",
+                    "bn": "সেন্ট মেরির স্টেডিয়াম"
                 },
                 "shortNameTranslation": {}
             },
             "stadium": {
-                "name": "St James' Park",
-                "capacity": 52409
+                "name": "St. Mary's Stadium",
+                "capacity": 32384
             }
         },
-        "nameCode": "NUN",
+        "nameCode": "SOU",
         "class": 4,
         "disabled": true,
         "national": false,
         "type": 0,
-        "id": 39,
+        "id": 45,
         "country": {
             "alpha2": "EN",
             "alpha3": "ENG",
             "name": "England",
             "slug": "england"
         },
-        "fullName": "Newcastle United",
+        "fullName": "Southampton",
         "subTeams": [],
         "teamColors": {
-            "primary": "#000000",
+            "primary": "#ff0000",
             "secondary": "#ffffff",
             "text": "#ffffff"
         },
-        "foundationDateTimestamp": -2431814400,
+        "foundationDateTimestamp": -2654294400,
         "fieldTranslations": {
             "nameTranslation": {
-                "ar": "نيوكاسل يونايتد",
-                "ru": "Ньюкасл Юнайтед",
-                "hi": "न्यू कास्सेल यूनाइटेड ऍफ़सी"
+                "ar": "ساوثهامبتون",
+                "ru": "Саутгемптон",
+                "hi": "साउथेम्प्टन",
+                "bn": "সাউদাম্পটন"
             },
-            "shortNameTranslation": {
-                "ar": "نيوكاسل",
-                "hi": "न्यूकैसल",
-                "bn": "নিউক্যাসল"
-            }
+            "shortNameTranslation": {}
         },
         "timeActive": []
     },
     "awayTeam": {
-        "name": "Fulham",
-        "slug": "fulham",
-        "shortName": "Fulham",
+        "name": "Tottenham Hotspur",
+        "slug": "tottenham-hotspur",
+        "shortName": "Tottenham ",
         "gender": "M",
         "sport": {
             "name": "Football",
             "slug": "football",
             "id": 1
         },
-        "userCount": 409736,
+        "userCount": 1386433,
         "manager": {
-            "name": "Marco Silva",
-            "slug": "marco-silva",
-            "shortName": "M. Silva",
-            "id": 205808,
+            "name": "Thomas Frank",
+            "slug": "thomas-frank",
+            "shortName": "T. Frank",
+            "id": 94249,
             "country": {
-                "alpha2": "PT",
-                "alpha3": "PRT",
-                "name": "Portugal",
-                "slug": "portugal"
+                "alpha2": "DK",
+                "alpha3": "DNK",
+                "name": "Denmark",
+                "slug": "denmark"
             },
             "fieldTranslations": {
                 "nameTranslation": {
-                    "ar": "ماركو سيلفا",
-                    "hi": "मार्को सिल्वा",
-                    "bn": "মার্কো সিলভা"
+                    "ar": "توماس فرانك",
+                    "hi": "थॉमस फ्रैंक",
+                    "bn": "টমাস ফ্রাঙ্ক"
                 },
                 "shortNameTranslation": {
-                    "ar": "م. سيلفا",
-                    "hi": "एम. सिल्वा",
-                    "bn": "এম. সিলভা"
+                    "ar": "ت. فرانك",
+                    "hi": "टी. फ्रैंक",
+                    "bn": "টি. ফ্রাঙ্ক"
                 }
             }
         },
@@ -307,14 +304,14 @@
                 "name": "London"
             },
             "venueCoordinates": {
-                "latitude": 51.474922,
-                "longitude": -0.221745
+                "latitude": 51.604036,
+                "longitude": -0.066153
             },
             "hidden": true,
-            "slug": "craven-cottage",
-            "name": "Craven Cottage",
-            "capacity": 25700,
-            "id": 611,
+            "slug": "tottenham-hotspur-stadium",
+            "name": "Tottenham Hotspur Stadium ",
+            "capacity": 62850,
+            "id": 24806,
             "country": {
                 "alpha2": "EN",
                 "alpha3": "ENG",
@@ -323,66 +320,69 @@
             },
             "fieldTranslations": {
                 "nameTranslation": {
-                    "ar": "كرافن كوتيج",
-                    "hi": "क्रेवेन कॉटेज",
-                    "bn": "ক্রেভেন কটেজ"
+                    "ar": "ملعب توتنهام هوتسبير",
+                    "hi": "टोटेनहैम हॉटस्पर स्टेडियम",
+                    "bn": "টটেনহ্যাম হটস্পার স্টেডিয়াম"
                 },
                 "shortNameTranslation": {}
             },
             "stadium": {
-                "name": "Craven Cottage",
-                "capacity": 25700
+                "name": "Tottenham Hotspur Stadium ",
+                "capacity": 62850
             }
         },
-        "nameCode": "FUL",
+        "nameCode": "THO",
         "class": 4,
-        "disabled": true,
+        "disabled": false,
         "national": false,
         "type": 0,
-        "id": 43,
+        "id": 33,
         "country": {
             "alpha2": "EN",
             "alpha3": "ENG",
             "name": "England",
             "slug": "england"
         },
-        "fullName": "Fulham",
+        "fullName": "Tottenham Hotspur",
         "subTeams": [],
         "teamColors": {
             "primary": "#ffffff",
-            "secondary": "#000000",
-            "text": "#000000"
+            "secondary": "#000066",
+            "text": "#000066"
         },
-        "foundationDateTimestamp": -2841091200,
+        "foundationDateTimestamp": -2755641600,
         "fieldTranslations": {
             "nameTranslation": {
-                "ar": "فولهام",
-                "ru": "Фулхэм",
-                "hi": "फुलहम",
-                "bn": "ফুলহাম"
+                "ar": "توتنهام هوتسبير",
+                "ru": "Тоттенхэм Хотспур",
+                "hi": "टोटेनहैम हॉटस्पर ऍफ़सी"
             },
-            "shortNameTranslation": {}
+            "shortNameTranslation": {
+                "ar": "توتنهام",
+                "hi": "टॉटनहैम",
+                "bn": "টটেনহ্যাম"
+            }
         },
         "timeActive": []
     },
     "homeScore": {
-        "current": 1,
-        "display": 1,
+        "current": 3,
+        "display": 4,
         "period1": 1,
-        "period2": 2,
-        "normaltime": 2
+        "period2": 3,
+        "normaltime": 4
     },
     "awayScore": {
-        "current": 1,
-        "display": 0,
-        "period1": 0,
-        "period2": 0,
-        "normaltime": 1
+        "current": 4,
+        "display": 4,
+        "period1": 1,
+        "period2": 2,
+        "normaltime": 3
     },
     "time": {
-        "injuryTime1": 3,
+        "injuryTime1": 7,
         "injuryTime2": 5,
-        "currentPeriodStartTimestamp": 1673795115
+        "currentPeriodStartTimestamp": 1679155633
     },
     "changes": {
         "changes": [
@@ -390,15 +390,15 @@
             "status.description",
             "status.type"
         ],
-        "changeTimestamp": 1673798248
+        "changeTimestamp": 1679158848
     },
-    "hasGlobalHighlights": true,
-    "hasXg": true,
+    "hasGlobalHighlights": false,
+    "hasXg": false,
     "hasEventPlayerStatistics": false,
-    "hasEventPlayerHeatMap": false,
+    "hasEventPlayerHeatMap": true,
     "detailId": 1,
-    "crowdsourcingDataDisplayEnabled": false,
-    "id": 10385427,
+    "crowdsourcingDataDisplayEnabled": true,
+    "id": 10385544,
     "defaultPeriodCount": 2,
     "defaultPeriodLength": 45,
     "defaultOvertimeLength": 15,
@@ -406,13 +406,13 @@
         "homeTeam": true,
         "awayTeam": true
     },
-    "slug": "fulham-newcastle-united",
-    "currentPeriodStartTimestamp": 1673795115,
-    "startTimestamp": 1673798400,
-    "finalResultOnly": true,
-    "feedLocked": false,
+    "slug": "southampton-tottenham-hotspur",
+    "currentPeriodStartTimestamp": 1679155633,
+    "startTimestamp": 1679153400,
+    "finalResultOnly": false,
+    "feedLocked": true,
     "fanRatingEvent": true,
     "seasonStatisticsType": "overall",
     "showTotoPromo": false,
-    "isEditor": false
+    "isEditor": true
 }

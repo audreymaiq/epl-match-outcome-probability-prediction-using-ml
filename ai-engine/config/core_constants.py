@@ -131,6 +131,7 @@ SOFASCORE_OUTCOME_MAPPING = {
     "1": MatchOutcome.HOME,
     "2": MatchOutcome.AWAY,
     "0": MatchOutcome.DRAW,
+    "3": MatchOutcome.DRAW,
     "home": MatchOutcome.HOME,
     "away": MatchOutcome.AWAY,
     "draw": MatchOutcome.DRAW

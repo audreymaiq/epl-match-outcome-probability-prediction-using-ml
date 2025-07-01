@@ -7,7 +7,7 @@ setup_test_environment()
 
 import logging
 import json
-import os   
+import os
 from datetime import datetime
 from pybreaker import CircuitBreaker
 import random
@@ -28,10 +28,14 @@ def setup_logging():
     logging.getLogger("curl_cffi").setLevel(logging.WARNING)
 
 #  Hàm helper để lưu file JSON ---
-def save_to_json(data, filename, output_dir="scripts/test/output_test"):
+def save_to_json(data, filename, output_dir=None):
     """Lưu dữ liệu vào file JSON trong một thư mục chỉ định."""
     try:
-        # Tạo thư mục output nếu chưa tồn tại
+        if output_dir is None:
+            # Lấy đường dẫn tuyệt đối tới thư mục scripts/test/
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            output_dir = os.path.join(current_dir, "output_test")
+
         os.makedirs(output_dir, exist_ok=True)
         
         filepath = os.path.join(output_dir, filename)

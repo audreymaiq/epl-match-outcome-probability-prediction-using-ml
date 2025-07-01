@@ -1,5 +1,5 @@
 {
-    "external_id": 10385427,
+    "external_id": 10385544,
     "season": {
         "name": "2022/23",
         "start_year": 2022,
@@ -12,55 +12,55 @@
         },
         "internal_id": null
     },
-    "match_datetime": "2023-01-15T16:00:00+00:00",
-    "match_week": "20",
+    "match_datetime": "2023-03-18T15:30:00+00:00",
+    "match_week": "28",
     "home_team": {
-        "external_id": 39,
-        "name": "Newcastle",
-        "short_name": "Newcastle",
+        "external_id": 45,
+        "name": "Southampton",
+        "short_name": "Southampton",
         "stadium": {
-            "name": "St James' Park",
-            "city": "Newcastle upon Tyne",
-            "capacity": 52409,
+            "name": "St. Mary's Stadium",
+            "city": "Southampton",
+            "capacity": 32384,
             "timezone": null,
             "internal_id": null
         },
         "established_year": null,
-        "logo_url": "https://api.sofascore.com/api/v1/team/39/image",
+        "logo_url": "https://api.sofascore.com/api/v1/team/45/image",
         "internal_id": null
     },
     "away_team": {
-        "external_id": 43,
-        "name": "Fulham",
-        "short_name": "Fulham",
+        "external_id": 33,
+        "name": "Tottenham",
+        "short_name": "Tottenham ",
         "stadium": null,
         "established_year": null,
-        "logo_url": "https://api.sofascore.com/api/v1/team/43/image",
+        "logo_url": "https://api.sofascore.com/api/v1/team/33/image",
         "internal_id": null
     },
     "status": "FINISHED",
-    "outcome": "H",
-    "home_goals": 1,
-    "away_goals": 1,
+    "outcome": "Unknown",
+    "home_goals": 3,
+    "away_goals": 4,
     "half_time_home_goals": 1,
-    "half_time_away_goals": 0,
+    "half_time_away_goals": 1,
     "stadium": {
-        "name": "St James' Park",
-        "city": "Newcastle upon Tyne",
-        "capacity": 52409,
+        "name": "St. Mary's Stadium",
+        "city": "Southampton",
+        "capacity": 32384,
         "timezone": null,
         "internal_id": null
     },
     "referee": {
-        "external_id": 74264,
-        "name": "Robert Jones",
+        "external_id": 79902,
+        "name": "Simon Hooper",
         "date_of_birth": null,
         "country": null,
         "internal_id": null
     },
-    "importance": "LOW",
+    "importance": "MEDIUM",
     "status_label": 2,
-    "outcome_label": 0,
+    "outcome_label": -1,
     "internal_id": null,
     "events": []
 }
