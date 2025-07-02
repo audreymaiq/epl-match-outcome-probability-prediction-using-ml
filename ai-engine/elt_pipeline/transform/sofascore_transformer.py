@@ -111,21 +111,11 @@ class SofaScoreTransformer:
         flat_data = {}
         try:
 
-            print("\n--- DEBUG: RAW MATCH DATA (INPUT) ---")
-            import json
-            print(json.dumps(raw_match_data.get('homeScore'), indent=2))
-            print(json.dumps(raw_match_data.get('awayScore'), indent=2))
-            print("---------------------------------------\n")
-
             # BƯỚC 1: ÁP DỤNG MAPPING - Tạo ra một dict phẳng, đã đổi tên
             flat_data = self._apply_mapping_rules(raw_match_data)
 
-            print("\n--- DEBUG: FLAT DATA (OUTPUT) ---")
-            # In ra tất cả các key liên quan đến score
-            score_keys = [k for k in flat_data.keys() if 'goal' in k]
-            for key in score_keys:
-                print(f"{key} from flat_data: {flat_data.get(key)}")
-            print("-----------------------------------\n")
+            flat_data['home_goals'] = flat_data.get('home_goals_normaltime')
+            flat_data['away_goals'] = flat_data.get('away_goals_normaltime')
 
             self._validate_required_fields(flat_data)
 
@@ -172,7 +162,9 @@ class SofaScoreTransformer:
                 external_id=self._safe_int_conversion(flat_data.get('home_team_venue_id')),
                 name=flat_data.get('home_team_venue_name'),
                 city=flat_data.get('home_team_venue_city'),
-                capacity=self._safe_int_conversion(flat_data.get('home_team_venue_capacity'))
+                capacity=self._safe_int_conversion(flat_data.get('home_team_venue_capacity')),
+                latitude=flat_data.get('home_team_venue_latitude'),
+                longitude=flat_data.get('home_team_venue_longitude')
             ) if flat_data.get('home_team_venue_id') else None
 
             home_foundation_date = flat_data.get('home_team_established_ts')
@@ -193,6 +185,15 @@ class SofaScoreTransformer:
                 secondary_color=flat_data.get('home_team_secondary_color')
             )
             
+            away_team_stadium = ParsedStadium(
+                external_id=self._safe_int_conversion(flat_data.get('away_team_venue_id')),
+                name=flat_data.get('away_team_venue_name'),
+                city=flat_data.get('away_team_venue_city'),
+                capacity=self._safe_int_conversion(flat_data.get('away_team_venue_capacity')),
+                latitude=flat_data.get('away_team_venue_latitude'),
+                longitude=flat_data.get('away_team_venue_longitude'),
+            ) if flat_data.get('away_team_venue_id') else None            
+
             away_foundation_date = flat_data.get('away_team_established_ts')
             away_team = ParsedTeam(
                 external_id=self._safe_int_conversion(flat_data['away_team_id']),
@@ -200,7 +201,7 @@ class SofaScoreTransformer:
                 short_name=flat_data.get('away_team_short_name'),
                 name_code=flat_data.get('away_team_code'),
                 full_name=flat_data.get('away_team_full_name'),
-                stadium=None, # API thường không cung cấp sân nhà của đội khách trong context trận đấu
+                stadium=away_team_stadium,
                 established_year=away_foundation_date.year if away_foundation_date else None,
                 logo_url=f"https://api.sofascore.com/api/v1/team/{flat_data['away_team_id']}/image",
                 fan_count=self._safe_int_conversion(flat_data.get('away_team_fan_count')),
@@ -221,6 +222,23 @@ class SofaScoreTransformer:
             outcome_label = MLOutcomeLabels.from_outcome(outcome)
             
             # BƯỚC 5: LẮP RÁP OBJECT PARSEDMATCH
+            #  LOGIC TÍNH TOÁN TỶ SỐ HIỆP 2  
+            ht_home_goals = self._safe_int_conversion(flat_data.get('half_time_home_goals'))
+            ht_away_goals = self._safe_int_conversion(flat_data.get('half_time_away_goals'))
+
+            # Sử dụng 'home_goals_normaltime' để đảm bảo tính nhất quán, vì nó luôn có giá trị
+            ft_home_goals = self._safe_int_conversion(flat_data.get('home_goals_normaltime'))
+            ft_away_goals = self._safe_int_conversion(flat_data.get('away_goals_normaltime'))
+
+            sh_home_goals = None
+            sh_away_goals = None
+
+            if ft_home_goals is not None and ht_home_goals is not None:
+                sh_home_goals = ft_home_goals - ht_home_goals
+
+            if ft_away_goals is not None and ht_away_goals is not None:
+                sh_away_goals = ft_away_goals - ht_away_goals            
+
             match = ParsedMatch(
                 # Các trường bắt buộc
                 external_id=self._safe_int_conversion(flat_data.get('match_id')),
@@ -246,8 +264,8 @@ class SofaScoreTransformer:
                 half_time_away_goals=self._safe_int_conversion(flat_data.get('half_time_away_goals')),
                 home_goals_normaltime=self._safe_int_conversion(flat_data.get('home_goals_normaltime')),
                 away_goals_normaltime=self._safe_int_conversion(flat_data.get('away_goals_normaltime')),
-                second_half_home_goals=self._safe_int_conversion(flat_data.get('second_half_home_goals')),
-                second_half_away_goals=self._safe_int_conversion(flat_data.get('second_half_away_goals')),
+                second_half_home_goals=sh_home_goals,
+                second_half_away_goals=sh_away_goals,
                 injury_time_first_half=self._safe_int_conversion(flat_data.get('injury_time_first_half')),
                 injury_time_second_half=self._safe_int_conversion(flat_data.get('injury_time_second_half')),
                 has_xg=flat_data.get('has_xg'),

@@ -62,9 +62,37 @@ def unified_player_availability_mapper(status: Optional[str], api_type: str = "s
     """Unified player availability mapper cho cả SofaScore và API-Football"""
     return get_player_availability(status, api_type)
 
+def unified_event_type_mapper(event_type: Optional[str], api_type: str = "sofascore") -> str:
+    """Unified event type mapper"""
+    if not event_type:
+        return None
+    
+    if api_type == "sofascore":
+        return SOFASCORE_EVENT_MAPPING.get(event_type)
+    else:  # api_football
+        return API_FOOTBALL_EVENT_MAPPING.get(event_type)
+
+def unified_period_mapper(period: Optional[Union[str, int]], api_type: str = "sofascore") -> str:
+    """Unified period mapper"""
+    if period is None:
+        return None
+    
+    period_str = str(period)
+    if api_type == "sofascore":
+        return SOFASCORE_PERIOD_MAPPING.get(period_str)
+    else:  # api_football
+        return API_FOOTBALL_PERIOD_MAPPING.get(period_str)
+
+def unified_match_status_mapper(status: Optional[str], api_type: str = "sofascore") -> Optional[MatchStatus]:
+    """Unified status mapper."""
+    return get_match_status(status, api_type)
+
+def unified_match_outcome_mapper(outcome: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[MatchOutcome]:
+    """Unified outcome mapper."""
+    return get_match_outcome(outcome, api_type)
+
 # =============================================================================
 # LEGACY MAPPERS - Backward compatibility
-# =============================================================================
 
 # API-Football legacy mappers
 position_mapper = safe_mapping(API_FOOTBALL_POSITION_MAPPING, default=PlayerPosition.UNKNOWN)
@@ -79,8 +107,7 @@ sofascore_outcome_mapper = safe_mapping(SOFASCORE_OUTCOME_MAPPING, default=Match
 sofascore_player_status_mapper = safe_mapping(SOFASCORE_PLAYER_AVAILABILITY_MAPPING, default=PlayerStatus.UNKNOWN)
 
 # =============================================================================
-# EVENT TYPE MAPPINGS - Enhanced for both APIs
-# =============================================================================
+# EVENT TYPE MAPPINGS 
 
 # API-Football event types
 API_FOOTBALL_EVENT_MAPPING = {
@@ -125,22 +152,11 @@ SOFASCORE_EVENT_MAPPING = {
     "offside": "offside"
 }
 
-def unified_event_type_mapper(event_type: Optional[str], api_type: str = "sofascore") -> str:
-    """Unified event type mapper"""
-    if not event_type:
-        return None
-    
-    if api_type == "sofascore":
-        return SOFASCORE_EVENT_MAPPING.get(event_type)
-    else:  # api_football
-        return API_FOOTBALL_EVENT_MAPPING.get(event_type)
-
 # Legacy mapper for backward compatibility
 event_type_mapper = safe_mapping(API_FOOTBALL_EVENT_MAPPING, default=None)
 
 # =============================================================================
-# PERIOD MAPPINGS - Enhanced for both APIs
-# =============================================================================
+# PERIOD MAPPINGS 
 
 # API-Football period mapping
 API_FOOTBALL_PERIOD_MAPPING = {
@@ -159,31 +175,11 @@ SOFASCORE_PERIOD_MAPPING = {
     "5": "PEN"
 }
 
-def unified_period_mapper(period: Optional[Union[str, int]], api_type: str = "sofascore") -> str:
-    """Unified period mapper"""
-    if period is None:
-        return None
-    
-    period_str = str(period)
-    if api_type == "sofascore":
-        return SOFASCORE_PERIOD_MAPPING.get(period_str)
-    else:  # api_football
-        return API_FOOTBALL_PERIOD_MAPPING.get(period_str)
-
-def unified_match_status_mapper(status: Optional[str], api_type: str = "sofascore") -> Optional[MatchStatus]:
-    """Unified status mapper."""
-    return get_match_status(status, api_type)
-
-def unified_match_outcome_mapper(outcome: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[MatchOutcome]:
-    """Unified outcome mapper."""
-    return get_match_outcome(outcome, api_type)
-
 # Legacy mapper
 period_mapper = safe_mapping(API_FOOTBALL_PERIOD_MAPPING, default=None)
 
 # =============================================================================
 # LOCATION MAPPINGS
-# =============================================================================
 
 LOCATION_MAPPING = {
     "home": "Home",
@@ -195,7 +191,6 @@ location_mapper = safe_mapping(LOCATION_MAPPING, default="Overall")
 
 # =============================================================================
 # CARD MAPPINGS
-# =============================================================================
 
 CARD_MAPPING = {
     "yellow": "yellow_cards",
@@ -207,7 +202,6 @@ card_mapper = safe_mapping(CARD_MAPPING, default=None)
 
 # =============================================================================
 # BOOKMAKER MAPPINGS
-# =============================================================================
 
 def load_bookmaker_mapping() -> Dict[int, str]:
     """
@@ -257,8 +251,7 @@ def bookmaker_mapper(bookmaker_id: Optional[Union[int, str]]) -> str:
         return "Unknown"
 
 # =============================================================================
-# FIELD MAPPINGS - Enhanced for both APIs
-# =============================================================================
+# FIELD MAPPINGS 
 
 # API-Football field mapping
 API_FOOTBALL_FIELD_MAPPING = {
@@ -339,12 +332,8 @@ SOFASCORE_FIELD_MAPPING = {
     "hasEventPlayerStatistics": "has_event_player_statistics",
 
     # ========== Score Details ==========
-    "homeScore.current": "home_goals",
-    "awayScore.current": "away_goals",
     "homeScore.period1": "half_time_home_goals",
     "awayScore.period1": "half_time_away_goals",
-    "homeScore.period2": "second_half_home_goals",
-    "awayScore.period2": "second_half_away_goals",
     "homeScore.normaltime": "home_goals_normaltime",
     "awayScore.normaltime": "away_goals_normaltime",
 
@@ -367,6 +356,8 @@ SOFASCORE_FIELD_MAPPING = {
     "homeTeam.venue.name": "home_team_venue_name",
     "homeTeam.venue.city.name": "home_team_venue_city",
     "homeTeam.venue.capacity": "home_team_venue_capacity",
+    "homeTeam.venue.venueCoordinates.latitude": "home_team_venue_latitude",
+    "homeTeam.venue.venueCoordinates.longitude": "home_team_venue_longitude",    
     "homeTeam.teamColors.primary": "home_team_primary_color",
     "homeTeam.teamColors.secondary": "home_team_secondary_color",
     
@@ -381,6 +372,12 @@ SOFASCORE_FIELD_MAPPING = {
     "awayTeam.manager.name": "away_team_manager_name",
     "awayTeam.manager.id": "away_team_manager_id",
     "awayTeam.manager.country.name": "away_team_manager_country",
+    "awayTeam.venue.id": "away_team_venue_id",
+    "awayTeam.venue.name": "away_team_venue_name",
+    "awayTeam.venue.city.name": "away_team_venue_city",
+    "awayTeam.venue.capacity": "away_team_venue_capacity",
+    "awayTeam.venue.venueCoordinates.latitude": "away_team_venue_latitude",
+    "awayTeam.venue.venueCoordinates.longitude": "away_team_venue_longitude",
     "awayTeam.teamColors.primary": "away_team_primary_color",
     "awayTeam.teamColors.secondary": "away_team_secondary_color",
     
@@ -504,8 +501,7 @@ def convert_possession_percent(value: Union[str, int, float, None]) -> Optional[
         return None
 
 # =============================================================================
-# SPECIAL CONVERSIONS - Enhanced for both APIs
-# =============================================================================
+# SPECIAL CONVERSIONS 
 
 # API-Football special conversions
 API_FOOTBALL_SPECIAL_CONVERSIONS = {
@@ -536,7 +532,6 @@ SPECIAL_CONVERSIONS = API_FOOTBALL_SPECIAL_CONVERSIONS
 
 # =============================================================================
 # ENDPOINT CONFIGURATIONS
-# =============================================================================
 
 # API-Football paginated endpoints
 API_FOOTBALL_PAGINATED_ENDPOINTS = [

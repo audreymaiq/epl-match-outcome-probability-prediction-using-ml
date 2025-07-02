@@ -59,7 +59,6 @@ class SofaScoreEndpoints(Enum):
     MATCH_MOMENTUM = "/event/{match_id}/momentum"
     MATCH_HEATMAP = "/event/{match_id}/heatmap/{team_id}"
     MATCH_SHOTMAP = "/event/{match_id}/shotmap"
-    MATCH_HIGHLIGHTS = "/event/{match_id}/highlights"
     
     # === Tournament/Season Endpoints ===
     TOURNAMENT_INFO = "/unique-tournament/{tournament_id}"

@@ -59,28 +59,63 @@ def main():
 
     # Danh sách endpoint và param nếu có
     endpoints = [
+        # === Core Match Endpoints ===
         (f"/event/{ids['match_id']}", None),
         (f"/event/{ids['match_id']}/lineups", None),
         (f"/event/{ids['match_id']}/statistics", None),
         (f"/event/{ids['match_id']}/incidents", None),
+        (f"/event/{ids['match_id']}/h2h/events", None),
         (f"/event/{ids['match_id']}/graph", None),
+        (f"/event/{ids['match_id']}/momentum", None),
+        (f"/event/{ids['match_id']}/heatmap/{ids['home_team_id']}", None),
         (f"/event/{ids['match_id']}/shotmap", None),
 
+        # === Tournament/Season Endpoints ===
         (f"/unique-tournament/{ids['tournament_id']}", None),
         (f"/unique-tournament/{ids['tournament_id']}/seasons", None),
-        (f"/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/standings/total", None),
+        (f"/unique-tournament/{ids['tournament_id']}/categories", None),
+        (f"/unique-tournament/{ids['tournament_id']}/media", None),
 
+        # === Season-specific Endpoints ===
+        (f"/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/standings/total", None),
+        (f"/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/events/last/0", None),
+        (f"/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/events/next/0", None),
+        (f"/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/events/round/1", None),
+        (f"/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/top-players/goals", None),
+        (f"/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/statistics", None),
+
+        # === Team Endpoints ===
+        (f"/team/{ids['home_team_id']}", None),
+        (f"/team/{ids['home_team_id']}/details", None),
         (f"/team/{ids['home_team_id']}/players", None),
         (f"/team/{ids['home_team_id']}/events/last/0", None),
+        (f"/team/{ids['home_team_id']}/events/next/0", None),
         (f"/team/{ids['home_team_id']}/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/statistics/overall", None),
+        (f"/team/{ids['home_team_id']}/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/statistics/breakdown", None),
+        (f"/team/{ids['home_team_id']}/transfers", None),
+        (f"/team/{ids['home_team_id']}/media", None),
 
+        # === Player Endpoints ===
         (f"/player/{player_id}", None),
+        (f"/player/{player_id}/details", None),
+        (f"/player/{player_id}/unique-tournament/{ids['tournament_id']}/season/{ids['season_id']}/statistics/overall", None),
         (f"/player/{player_id}/statistics/seasons", None),
         (f"/player/{player_id}/characteristics", None),
+        (f"/player/{player_id}/transfers", None),
+        (f"/player/{player_id}/media", None),
+        (f"/player/{player_id}/events/last/0", None),
 
-        (f"/sports", None),  
+        # === Live Endpoints ===
+        (f"/sport/1/events/live", None),
+        (f"/event/{ids['match_id']}/tracker", None),
+
+        # === Search ===
+        (f"/search/all", {"term": "manchester"}),
+        (f"/search/manchester", None),
+
+        # === General ===
         (f"/sport/1/categories", None),
-        (f"/search/all", {"term": "manchester"})  
+        (f"/sports", None)
     ]
 
     results = []
