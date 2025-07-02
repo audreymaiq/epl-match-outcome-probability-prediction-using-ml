@@ -205,7 +205,7 @@ class DatabaseConnector:
             logger.debug("Database session committed successfully")
         except Exception as e:
             session.rollback()
-            logger.error(f"Database operation failed, rolled back: {str(e)}")
+            logger.error(f"Database operation failed, rolled back: {str(e)}", exc_info=True)
             raise
         finally:
             try:
@@ -301,25 +301,3 @@ class DatabaseConnector:
         except Exception as e:
             logger.error(f"Error getting connection info: {str(e)}")
             return None
-
-# # Conditional health check - only in production or when explicitly requested
-# def _should_run_health_check() -> bool:
-#     """Determine if health check should run on import"""
-#     config = get_config()
-#     # Only run health check in production or when explicitly enabled
-#     return (
-#         config.is_production or 
-#         os.getenv("DB_HEALTH_CHECK_ON_IMPORT", "false").lower() == "true"
-#     )
-
-# # Health check khi import (conditional)
-# if _should_run_health_check():
-#     try:
-#         if not DatabaseConnector.check_connection():
-#             logger.critical("CRITICAL: Database connection test failed on startup")
-#         else:
-#             logger.info("Database connection test passed on startup")
-#     except Exception as e:
-#         logger.critical(f"CRITICAL: Database health check failed on startup: {str(e)}")
-# else:
-#     logger.debug("Skipping database health check on import (development mode)")

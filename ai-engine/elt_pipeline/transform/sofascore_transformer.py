@@ -20,7 +20,6 @@ from config.field_mappings import (
     unified_event_type_mapper, unified_period_mapper, unified_position_mapper,
     unified_match_status_mapper, unified_match_outcome_mapper
 )
-from config.core_constants import MatchStatus, MatchOutcome
 from config.business_constants import (
     MatchBusinessLogic, SeasonBusinessLogic, RefereeBusinessLogic,
     MLOutcomeLabels, encode_match_status
@@ -213,32 +212,42 @@ class SofaScoreTransformer:
             )
 
             # BƯỚC 4: LÀM GIÀU DỮ LIỆU (ENRICHMENT)
-            status = unified_match_status_mapper(flat_data.get('status_description'), self.api_type) or MatchStatus.UNKNOWN
-            outcome = unified_match_outcome_mapper(str(flat_data.get('outcome_code')), self.api_type) or MatchOutcome.UNKNOWN
+            status = unified_match_status_mapper(flat_data.get('status_description'), self.api_type)
+            outcome = unified_match_outcome_mapper(str(flat_data.get('outcome_code')), self.api_type)
             
-            # Gọi hàm logic nghiệp vụ bằng cách truyền cả object để có thể xử lý sâu hơn
+            if status is None:
+                logger.error(
+                    f"Skipping match due to unmappable status: "
+                    f"'{flat_data.get('status_description')}'",
+                    extra={"match_id": flat_data.get('match_id')}
+                )
+                return None # Loại bỏ hoàn toàn trận đấu này
+            
+            # Nếu trận đấu đã kết thúc mà không có outcome, cũng có thể là không hợp lệ
+            if status == "FINISHED" and outcome is None:
+                logger.warning(
+                    f"Match {flat_data.get('match_id')} is FINISHED but has unmappable outcome code: "
+                    f"'{flat_data.get('outcome_code')}'. Will try to derive from score."
+                )
+                # Sẽ được xử lý ở bước kiểm tra tính nhất quán sau
+                pass
+
             importance = MatchBusinessLogic.determine_match_importance(home_team, away_team).value
             status_label = encode_match_status(status)
-            outcome_label = MLOutcomeLabels.from_outcome(outcome)
+            outcome_label = MLOutcomeLabels.from_outcome(outcome) # Sẽ trả về -1 nếu outcome là None
             
             # BƯỚC 5: LẮP RÁP OBJECT PARSEDMATCH
             #  LOGIC TÍNH TOÁN TỶ SỐ HIỆP 2  
-            ht_home_goals = self._safe_int_conversion(flat_data.get('half_time_home_goals'))
-            ht_away_goals = self._safe_int_conversion(flat_data.get('half_time_away_goals'))
+            ht_home_goals = self._safe_int_conversion(flat_data.get('half_time_home_goals'), default=0)
+            ht_away_goals = self._safe_int_conversion(flat_data.get('half_time_away_goals'), default=0)
 
             # Sử dụng 'home_goals_normaltime' để đảm bảo tính nhất quán, vì nó luôn có giá trị
-            ft_home_goals = self._safe_int_conversion(flat_data.get('home_goals_normaltime'))
-            ft_away_goals = self._safe_int_conversion(flat_data.get('away_goals_normaltime'))
+            ft_home_goals = self._safe_int_conversion(flat_data.get('home_goals_normaltime'), default=0)
+            ft_away_goals = self._safe_int_conversion(flat_data.get('away_goals_normaltime'), default=0)
 
-            sh_home_goals = None
-            sh_away_goals = None
-
-            if ft_home_goals is not None and ht_home_goals is not None:
-                sh_home_goals = ft_home_goals - ht_home_goals
-
-            if ft_away_goals is not None and ht_away_goals is not None:
-                sh_away_goals = ft_away_goals - ht_away_goals            
-
+            sh_home_goals = ft_home_goals - ht_home_goals
+            sh_away_goals = ft_away_goals - ht_away_goals
+            
             match = ParsedMatch(
                 # Các trường bắt buộc
                 external_id=self._safe_int_conversion(flat_data.get('match_id')),
@@ -258,14 +267,14 @@ class SofaScoreTransformer:
                 referee=referee,
                 outcome=outcome,
                 outcome_code=self._safe_int_conversion(flat_data.get('outcome_code')),
-                home_goals=self._safe_int_conversion(flat_data.get('home_goals')),
-                away_goals=self._safe_int_conversion(flat_data.get('away_goals')),
-                half_time_home_goals=self._safe_int_conversion(flat_data.get('half_time_home_goals')),
-                half_time_away_goals=self._safe_int_conversion(flat_data.get('half_time_away_goals')),
-                home_goals_normaltime=self._safe_int_conversion(flat_data.get('home_goals_normaltime')),
-                away_goals_normaltime=self._safe_int_conversion(flat_data.get('away_goals_normaltime')),
+                home_goals=ft_home_goals,
+                away_goals=ft_away_goals,
+                half_time_home_goals=ht_home_goals,
+                half_time_away_goals=ht_away_goals,
                 second_half_home_goals=sh_home_goals,
                 second_half_away_goals=sh_away_goals,
+                home_goals_normaltime=ft_home_goals,
+                away_goals_normaltime=ft_away_goals,
                 injury_time_first_half=self._safe_int_conversion(flat_data.get('injury_time_first_half')),
                 injury_time_second_half=self._safe_int_conversion(flat_data.get('injury_time_second_half')),
                 has_xg=flat_data.get('has_xg'),
@@ -274,18 +283,14 @@ class SofaScoreTransformer:
             )
 
             # BƯỚC 6: KIỂM TRA TÍNH NHẤT QUÁN & XỬ LÝ SỰ KIỆN
-            if match.home_goals is not None and match.away_goals is not None:
-                # Luôn tính toán kết quả thực tế từ tỷ số
+            if match.status == "FINISHED" and match.home_goals is not None and match.away_goals is not None:
                 actual_outcome = MatchBusinessLogic.determine_outcome_from_score(
                     match.home_goals, match.away_goals
                 )
                 
-                # Kịch bản 1: API không cung cấp kết quả, nhưng chúng ta có thể suy ra từ tỷ số
-                if match.outcome == MatchOutcome.UNKNOWN:
-                    logger.info(
-                        f"Match {match.external_id} has no API outcome, but score is available. "
-                        f"Deriving outcome '{actual_outcome.value}' from score {match.home_goals}-{match.away_goals}."
-                    )
+                # Nếu outcome ban đầu là None, giờ chúng ta có thể điền nó vào
+                if match.outcome is None:
+                    logger.info(f"Derived outcome '{actual_outcome.value}' for match {match.external_id}.")
                     match.outcome = actual_outcome
                     match.outcome_label = MLOutcomeLabels.from_outcome(actual_outcome)
                     
@@ -316,17 +321,17 @@ class SofaScoreTransformer:
             logger.error(f"Unexpected error transforming match {flat_data.get('match_id', 'Unknown')}: {e}", exc_info=True)
             return None
 
-    def _safe_int_conversion(self, value: Any) -> Optional[int]:
+    def _safe_int_conversion(self, value: Any, default: Optional[int] = None) -> Optional[int]:
         """
-        Safely convert value to int, return None if conversion fails.
+        Safely convert value to int, return a default value if conversion fails.
         """
         if value is None:
-            return None
+            return default
         try:
             return int(value)
         except (ValueError, TypeError):
-            logger.warning(f"Could not convert value '{value}' to int")
-            return None
+            logger.warning(f"Could not convert value '{value}' to int, using default '{default}'")
+            return default
 
     def _get_or_create_player_from_cache(
         self, 

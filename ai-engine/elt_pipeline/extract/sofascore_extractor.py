@@ -39,7 +39,7 @@ class SofaScoreExtractor:
         params: Optional[Dict] = None,
         breaker: Optional[CircuitBreaker] = None,
         **kwargs
-    ) -> Optional[Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Phương thức private để thực hiện request với retry, delay và config động.
         """
@@ -66,7 +66,7 @@ class SofaScoreExtractor:
         for attempt in range(max_retries):
             try:
                 # Hàm thực thi request thực tế
-                def _execute_get():
+                def _execute_get() -> Optional[Dict[str, Any]]:
                     random_delay = self.scraping_config.get_random_delay()
                     total_delay = (base_delay + random_delay) * (backoff_factor ** attempt)
                     if attempt > 0 or base_delay > 0:
@@ -111,22 +111,38 @@ class SofaScoreExtractor:
                     return None
         return None
     
-    def fetch_paginated_data(self, endpoint: SofaScoreEndpoints, breaker: Optional[CircuitBreaker] = None, **kwargs) -> tuple[List[Dict], int]:
+    def fetch_paginated_data(
+        self, 
+        endpoint: SofaScoreEndpoints, 
+        response_field: str,
+        breaker: Optional[CircuitBreaker] = None, 
+        **kwargs
+    ) -> tuple[List[Dict], int]:
         """Fetch dữ liệu từ các endpoint có phân trang và trả về số request đã thực hiện."""
+        
+        if not response_field:
+            raise ValueError("response_field must be a non-empty string.")
+        
         all_items = []
         page = 0
         requests_made = 0
         empty_page_strikes = 0
         MAX_EMPTY_STRIKES = 2
-        
-        response_field = "events"  
-        
+                
         while empty_page_strikes < MAX_EMPTY_STRIKES:
             page += 1
-            kwargs['page'] = page
+            
+            # SỬA LỖI: Gộp tất cả các tham số cần thiết cho việc format URL vào một chỗ.
+            # `kwargs` chứa các tham số như tournament_id, season_id.
+            # Chúng ta thêm 'page' vào đó.
+            url_format_params = kwargs.copy()
+            url_format_params['page'] = page
             
             try:
-                data = self._make_request(endpoint, breaker=breaker, **kwargs)
+                # Bây giờ, tất cả các tham số cần để format URL (bao gồm cả page)
+                # đều được truyền qua **url_format_params.
+                # Không cần dùng tham số `params` nữa.
+                data = self._make_request(endpoint, breaker=breaker, **url_format_params)
                 requests_made += 1
                 
                 if data is None:
@@ -136,15 +152,14 @@ class SofaScoreExtractor:
                 
                 items = data.get(response_field, [])
                 
-                # Validate response structure
                 if not isinstance(items, list):
-                    logger.warning(f"Invalid response structure. Expected list, got {type(items)}", extra={"endpoint": endpoint.name, "page": page})
+                    logger.warning(f"Invalid response structure. Expected list for key '{response_field}', got {type(items)}", extra={"endpoint": endpoint.name, "page": page})
                     empty_page_strikes += 1
                     continue
                     
                 if not items:
                     empty_page_strikes += 1
-                    logger.info(f"Empty page detected (strike {empty_page_strikes}/{MAX_EMPTY_STRIKES})", extra={"endpoint": endpoint.name, "page": page})
+                    logger.info(f"Empty page detected for key '{response_field}' (strike {empty_page_strikes}/{MAX_EMPTY_STRIKES})", extra={"endpoint": endpoint.name, "page": page})
                     continue
 
                 empty_page_strikes = 0
@@ -154,52 +169,44 @@ class SofaScoreExtractor:
                 logger.warning(f"Stopping pagination for {endpoint.name} as circuit breaker is open.")
                 break
             except Exception as e:
-                logger.error(f"Unexpected error during pagination", extra={"endpoint": endpoint.name, "page": page, "error": str(e)})
-                requests_made += 1  # Count failed requests too
+                logger.error(f"Unexpected error during pagination", extra={"endpoint": endpoint.name, "page": page, "error": str(e)}, exc_info=True)
+                requests_made += 1
                 empty_page_strikes += 1
                 
-        logger.info(f"Pagination finished after {page} pages and {empty_page_strikes} empty strikes.", extra={"endpoint": endpoint.name, "total_items": len(all_items)})        
+        logger.info(f"Pagination finished for key '{response_field}' after {page} pages.", extra={"endpoint": endpoint.name, "total_items": len(all_items)})        
         return all_items, requests_made
 
     def fetch_match_detail(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
-        """Wrapper đơn giản để lấy chi tiết trận đấu."""
+        """Wrapper đơn giản để lấy chi tiết trận đấu. Trả về toàn bộ JSON response."""
         try:
-            data = self._make_request(SofaScoreEndpoints.MATCH_DETAIL, breaker=breaker, match_id=match_id)        
-            return data.get("event") if data else None
+            return self._make_request(SofaScoreEndpoints.MATCH_DETAIL, breaker=breaker, match_id=match_id)
         except CircuitBreakerError:
             return None
 
     def fetch_lineups(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
-        """Wrapper để lấy đội hình."""
+        """Wrapper để lấy đội hình. Trả về toàn bộ JSON response."""
         try:
             return self._make_request(SofaScoreEndpoints.MATCH_LINEUPS, breaker=breaker, match_id=match_id)
         except CircuitBreakerError:
             return None
 
     def fetch_statistics(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
-        """Wrapper để lấy thống kê."""
+        """Wrapper để lấy thống kê. Trả về toàn bộ JSON response."""
         try:
             return self._make_request(SofaScoreEndpoints.MATCH_STATISTICS, breaker=breaker, match_id=match_id)
         except CircuitBreakerError:
             return None
 
     def fetch_incidents(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
-        """Wrapper để lấy các sự kiện (bàn thắng, thẻ phạt, etc.)."""
+        """Wrapper để lấy các sự kiện. Trả về toàn bộ JSON response."""
         try:
-            # Gọi hàm _make_request với endpoint MATCH_INCIDENTS
-            data = self._make_request(
-                SofaScoreEndpoints.MATCH_INCIDENTS, 
-                breaker=breaker, 
-                match_id=match_id
-            )
-            # Dữ liệu sự kiện nằm trong key 'incidents'
-            return data.get("incidents") if data else None
+            return self._make_request(SofaScoreEndpoints.MATCH_INCIDENTS, breaker=breaker, match_id=match_id)
         except CircuitBreakerError:
             return None
 
     def fetch_paginated_events(self, endpoint: SofaScoreEndpoints, breaker: Optional[CircuitBreaker] = None, **kwargs) -> List[Dict]:
-        """Alias for fetch_paginated_data to match orchestrator expectations."""
-        items, _ = self.fetch_paginated_data(endpoint, breaker=breaker, **kwargs)
+        """Alias for fetch_paginated_data, mặc định lấy key 'events'."""
+        items, _ = self.fetch_paginated_data(endpoint, response_field="events", breaker=breaker, **kwargs)
         return items
 
     def close(self):

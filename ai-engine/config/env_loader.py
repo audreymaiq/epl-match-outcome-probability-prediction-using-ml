@@ -131,14 +131,3 @@ def load_environment(
         logger.warning("Đang chạy development mà không có file .env - không khuyến nghị lâu dài")
 
     return loaded_path
-
-
-def test():
-    load_dotenv(dotenv_path=".env")
-    print("DB_HOST:", os.getenv("HOST"))
-    print("DB_USER:", os.getenv("USER"))
-    print("DB_PASSWORD:", os.getenv("PASSWORD"))
-    print("DB_NAME:", os.getenv("DBNAME"))
-    print("HOST_POSTGRES_PORT:", os.getenv("HOST_POSTGRES_PORT"))
-    print("API_FOOTBALL_KEY:", os.getenv("API_FOOTBALL_KEY"))
-    print("API_FOOTBALL_BASE_URL:", os.getenv("API_FOOTBALL_BASE_URL"))

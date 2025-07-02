@@ -71,7 +71,8 @@ class QueueLogHandler(logging.Handler):
         try:
             # Đảm bảo không block nếu queue đầy
             if self.queue.full():
-                self.queue.get_nowait()
+                sys.stderr.write("Log queue is full, subsequent logs may be dropped.\n")
+                return 
             self.queue.put_nowait(record)
         except Exception:
             # Fallback cứng ra stderr với bảo vệ tốt hơn

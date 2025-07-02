@@ -260,36 +260,45 @@ class BusinessRules:
     # Historical Big Six teams (traditional top 6)
     BIG_SIX_TEAMS = [
         "Arsenal", "Chelsea", "Liverpool", 
-        "Manchester City", "Manchester United", "Tottenham"
+        "Manchester City", "Manchester United", "Tottenham Hotspur" 
     ]
     
     # Team name variations and normalization
     TEAM_NAME_MAPPING = {
-        # Manchester teams
-        "Manchester City": ["Man City", "Manchester City FC", "Man City FC"],
-        "Manchester United": ["Man United", "Manchester United FC", "Man Utd", "Man United FC"],
-        
-        # London teams
+        # Big Six
+        "Manchester City": ["Man City", "Manchester City FC"],
+        "Manchester United": ["Man United", "Man Utd", "Manchester United FC"],
         "Arsenal": ["Arsenal FC", "The Gunners"],
         "Chelsea": ["Chelsea FC", "The Blues"],
-        "Tottenham": ["Tottenham Hotspur", "Spurs", "Tottenham Hotspur FC"],
-        "Crystal Palace": ["Crystal Palace FC", "Palace"],
-        "Fulham": ["Fulham FC"],
-        "West Ham": ["West Ham United", "West Ham United FC", "The Hammers"],
-        "Brentford": ["Brentford FC"],
-        
-        # Liverpool teams
         "Liverpool": ["Liverpool FC", "The Reds"],
-        "Everton": ["Everton FC", "The Toffees"],
+        "Tottenham Hotspur": ["Tottenham", "Spurs", "Tottenham Hotspur FC"],
         
-        # Other notable teams
-        "Newcastle": ["Newcastle United", "Newcastle United FC", "The Magpies"],
+        # Other Premier League Teams
         "Aston Villa": ["Aston Villa FC", "Villa"],
-        "Brighton": ["Brighton & Hove Albion", "Brighton & Hove Albion FC", "The Seagulls"],
-        "Leicester": ["Leicester City", "Leicester City FC", "The Foxes"],
-        "Leeds": ["Leeds United", "Leeds United FC"],
+        "Bournemouth": ["AFC Bournemouth"],
+        "Brentford": ["Brentford FC"],
+        "Brighton & Hove Albion": ["Brighton", "Brighton & Hove Albion FC", "The Seagulls"],
+        "Crystal Palace": ["Crystal Palace FC", "Palace"],
+        "Everton": ["Everton FC", "The Toffees"],
+        "Fulham": ["Fulham FC"],
+        "Ipswich Town": ["Ipswich"], # Mùa 24/25
+        "Leicester City": ["Leicester", "Leicester City FC", "The Foxes"],
+        "Nottingham Forest": ["Nott'm Forest", "Notts Forest"],
+        "Southampton": ["Southampton FC", "Saints"],
+        "West Ham United": ["West Ham", "West Ham United FC", "The Hammers"],
+        "Wolverhampton Wanderers": ["Wolves", "Wolverhampton", "Wolverhampton Wanderers FC"],
+        "Newcastle United": ["Newcastle", "Newcastle United FC", "The Magpies"],
+
+        # Recently Relegated/Promoted or Common teams
+        "Leeds United": ["Leeds", "Leeds United FC"],
+        "Burnley": ["Burnley FC"],
+        "Luton Town": ["Luton"],
         "Sheffield United": ["Sheffield United FC", "The Blades"],
-        "Wolverhampton": ["Wolves", "Wolverhampton Wanderers FC", "Wolves FC"]
+        "Norwich City": ["Norwich"],
+        "Watford": ["Watford FC"],
+        "Stoke City": ["Stoke"],
+        "Swansea City": ["Swansea"],
+        "West Bromwich Albion": ["West Brom", "WBA"],
     }
     
     # Derby matches (high importance)
@@ -480,7 +489,9 @@ class SeasonBusinessLogic:
             if datetime.now().month >= 8:
                 return f"{current_year}/{str(current_year + 1)[-2:]}"
             else:
-                return f"{current_year - 1}/{str(current_year)[-2:]}"
+                end_year = current_year
+                start_year = current_year - 1
+                return f"{start_year}/{str(end_year)[-2:]}"
 
 # ======================== MATCH BUSINESS LOGIC ========================
 class MatchBusinessLogic:
@@ -526,23 +537,26 @@ class MatchBusinessLogic:
         
         return MatchImportance.LOW
     
-    @staticmethod
     def normalize_team_name(team_name: str) -> str:
-        """Chuẩn hóa tên đội bóng"""
-        if not team_name:
-            return ""
+        """Chuẩn hóa tên đội bóng, không phân biệt chữ hoa/thường."""
+        if not team_name or not isinstance(team_name, str):
+            return "Unknown"
         
-        team_name = team_name.strip()
+        # Chuyển về chữ thường để so sánh
+        normalized_input = team_name.strip().lower()
         
-        # Check exact matches first
         for standard_name, variations in BusinessRules.TEAM_NAME_MAPPING.items():
-            if team_name == standard_name:
+            # So sánh với tên chuẩn (đã chuyển về chữ thường)
+            if normalized_input == standard_name.lower():
                 return standard_name
-            if team_name in variations:
-                return standard_name
+            # So sánh với các biến thể (đã chuyển về chữ thường)
+            for variation in variations:
+                if normalized_input == variation.lower():
+                    return standard_name
         
-        # If no match found, return original (title case)
-        return team_name.title()
+        # Nếu không tìm thấy, ghi log và trả về tên gốc (đã title case) để dễ dàng phát hiện các tên cần thêm vào mapping
+        logger.warning(f"Unmapped team name: '{team_name}'. Returning as is.")
+        return team_name.strip().title()
     
     @staticmethod
     def calculate_points(goals_for: int, goals_against: int) -> int:

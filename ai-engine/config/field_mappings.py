@@ -91,20 +91,6 @@ def unified_match_outcome_mapper(outcome: Optional[Union[int, str]], api_type: s
     """Unified outcome mapper."""
     return get_match_outcome(outcome, api_type)
 
-# =============================================================================
-# LEGACY MAPPERS - Backward compatibility
-
-# API-Football legacy mappers
-position_mapper = safe_mapping(API_FOOTBALL_POSITION_MAPPING, default=PlayerPosition.UNKNOWN)
-status_mapper = safe_mapping(API_FOOTBALL_STATUS_MAPPING, default=MatchStatus.UNKNOWN)
-outcome_mapper = safe_mapping(API_FOOTBALL_OUTCOME_MAPPING, default=MatchOutcome.UNKNOWN)
-player_status_mapper = safe_mapping(API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING, default=PlayerStatus.UNKNOWN)
-
-# SofaScore specific mappers
-sofascore_position_mapper = safe_mapping(SOFASCORE_POSITION_MAPPING, default=PlayerPosition.UNKNOWN)
-sofascore_status_mapper = safe_mapping(SOFASCORE_STATUS_MAPPING, default=MatchStatus.UNKNOWN)
-sofascore_outcome_mapper = safe_mapping(SOFASCORE_OUTCOME_MAPPING, default=MatchOutcome.UNKNOWN)
-sofascore_player_status_mapper = safe_mapping(SOFASCORE_PLAYER_AVAILABILITY_MAPPING, default=PlayerStatus.UNKNOWN)
 
 # =============================================================================
 # EVENT TYPE MAPPINGS 

@@ -56,7 +56,6 @@ class SofaScoreEndpoints(Enum):
     MATCH_INCIDENTS = "/event/{match_id}/incidents"
     MATCH_H2H = "/event/{match_id}/h2h/events"
     MATCH_GRAPH = "/event/{match_id}/graph"
-    MATCH_MOMENTUM = "/event/{match_id}/momentum"
     MATCH_HEATMAP = "/event/{match_id}/heatmap/{team_id}"
     MATCH_SHOTMAP = "/event/{match_id}/shotmap"
     
@@ -94,10 +93,6 @@ class SofaScoreEndpoints(Enum):
     PLAYER_TRANSFERS = "/player/{player_id}/transfers"
     PLAYER_MEDIA = "/player/{player_id}/media"
     PLAYER_MATCHES = "/player/{player_id}/events/last/{page}"
-    
-    # === Live Data Endpoints ===
-    LIVE_MATCHES = "/sport/{sport_id}/events/live"
-    LIVE_MATCH_TRACKER = "/event/{match_id}/tracker"
     
     # === Search Endpoints ===
     SEARCH_ALL = "/search/all"
@@ -157,19 +152,12 @@ class EndpointCategory(Enum):
     """
     Phân loại các endpoint theo chức năng để áp dụng rate limiting và timeout phù hợp.
     """
-    LIVE = "live"
     SEARCH = "search" 
     MEDIA = "media"
     STANDARD = "standard"
 
 # Mapping endpoint → category để áp dụng rate limiting
 _ENDPOINT_CATEGORY_MAPPING = {
-    # Live endpoints - cần real-time data, rate limit thấp
-    SofaScoreEndpoints.LIVE_MATCHES: EndpointCategory.LIVE,
-    SofaScoreEndpoints.LIVE_MATCH_TRACKER: EndpointCategory.LIVE,
-    SofaScoreEndpoints.MATCH_MOMENTUM: EndpointCategory.LIVE,
-    SofaScoreEndpoints.MATCH_INCIDENTS: EndpointCategory.LIVE,
-    
     # Search endpoints - thường có rate limit nghiêm ngặt
     SofaScoreEndpoints.SEARCH_ALL: EndpointCategory.SEARCH,
     SofaScoreEndpoints.SEARCH: EndpointCategory.SEARCH,
@@ -178,7 +166,6 @@ _ENDPOINT_CATEGORY_MAPPING = {
     SofaScoreEndpoints.TOURNAMENT_MEDIA: EndpointCategory.MEDIA,
     SofaScoreEndpoints.TEAM_MEDIA: EndpointCategory.MEDIA,
     SofaScoreEndpoints.PLAYER_MEDIA: EndpointCategory.MEDIA,
-    SofaScoreEndpoints.MATCH_HIGHLIGHTS: EndpointCategory.MEDIA,
     SofaScoreEndpoints.MATCH_HEATMAP: EndpointCategory.MEDIA,
     SofaScoreEndpoints.MATCH_SHOTMAP: EndpointCategory.MEDIA,
 }
@@ -207,32 +194,12 @@ def get_endpoint_category(endpoint: SofaScoreEndpoints) -> EndpointCategory:
     name = endpoint.name.lower()
     
     # Auto-categorization based on endpoint name patterns
-    if any(x in name for x in ['live', 'tracker', 'momentum', 'incidents']):
-        return EndpointCategory.LIVE
-    elif any(x in name for x in ['search']):
+    if any(x in name for x in ['search']):
         return EndpointCategory.SEARCH
     elif any(x in name for x in ['media', 'highlights', 'heatmap', 'shotmap']):
         return EndpointCategory.MEDIA
     
     return EndpointCategory.STANDARD
-
-def is_live_endpoint(endpoint: SofaScoreEndpoints) -> bool:
-    """
-    Kiểm tra xem endpoint có phải là live endpoint không.
-    
-    Args:
-        endpoint: SofaScore endpoint
-        
-    Returns:
-        bool: True nếu là live endpoint
-        
-    Raises:
-        TypeError: Nếu endpoint không phải SofaScoreEndpoints
-    """
-    if not isinstance(endpoint, SofaScoreEndpoints):
-        raise TypeError(f"endpoint phải là SofaScoreEndpoints, nhận: {type(endpoint)}")
-    
-    return get_endpoint_category(endpoint) == EndpointCategory.LIVE
 
 def is_media_endpoint(endpoint: SofaScoreEndpoints) -> bool:
     """
@@ -374,7 +341,6 @@ def get_rate_limit_per_second(endpoint: SofaScoreEndpoints) -> float:
         category = get_endpoint_category(endpoint)
         
         rate_multipliers = {
-            EndpointCategory.LIVE: 0.5,      # giảm 50%
             EndpointCategory.SEARCH: 0.25,   # giảm 75%
             EndpointCategory.MEDIA: 1.5,     # tăng 50%
             EndpointCategory.STANDARD: 1.0   # giữ nguyên
@@ -424,7 +390,6 @@ def get_timeout_settings(endpoint: SofaScoreEndpoints) -> Tuple[int, int]:
         category = get_endpoint_category(endpoint)
         
         timeout_adjustments = {
-            EndpointCategory.LIVE: (lambda c, r: (max(5, c // 2), max(10, r // 2))),
             EndpointCategory.MEDIA: (lambda c, r: (c, r * 2)),
             EndpointCategory.SEARCH: (lambda c, r: (c, r)),
             EndpointCategory.STANDARD: (lambda c, r: (c, r))

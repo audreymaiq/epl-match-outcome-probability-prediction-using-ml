@@ -9,7 +9,7 @@ import pytz
 import logging
 import urllib.parse
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 
 ENV_FILE_PATH = (Path(__file__).parent.parent / ".env").resolve()
 if not ENV_FILE_PATH.exists():
@@ -584,7 +584,7 @@ class SeasonSettings(BaseSettings):
             return now.year if now.month >= 8 else now.year - 1
         except Exception:
             # Fallback an toàn
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             return now.year if now.month >= 8 else now.year - 1
 
     def get_target_seasons(self) -> List[Tuple[int, str]]:
@@ -596,7 +596,7 @@ class SeasonSettings(BaseSettings):
             
             completed_seasons = [
                 (year, name) for year, name in self.supported_seasons.items()
-                if year < current_start_year
+                if year <= current_start_year
             ]
             
             # Sắp xếp giảm dần theo năm và lấy số lượng cần thiết
@@ -608,9 +608,13 @@ class SeasonSettings(BaseSettings):
             # Fallback: Lấy các mùa giải mặc định và cắt theo số lượng
             default_seasons = sorted(self._get_default_seasons().items(), key=lambda x: x[0], reverse=True)
             # Đảm bảo không bị IndexError
-            start_idx = 1 if len(default_seasons) > 1 else 0
-            end_idx = min(len(default_seasons), start_idx + self.seasons_to_fetch)
-            return default_seasons[start_idx:end_idx]
+            
+            now = datetime.now(timezone.utc)
+            current_start_year = now.year if now.month >= 8 else now.year - 1            
+            
+            # Lọc các mùa đã hoàn thành và lấy số lượng cần thiết
+            completed_seasons_fallback = [s for s in default_seasons if s[0] < current_start_year]
+            return completed_seasons_fallback[:self.seasons_to_fetch]
 
     def get_season_id_from_year(self, year: int, sofascore_settings: 'SofascoreSettings') -> Optional[int]:
         """Get SofaScore season ID from year (e.g., 2023 -> season ID for 2023/24)"""

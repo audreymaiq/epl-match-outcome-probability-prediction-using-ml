@@ -39,19 +39,22 @@ class PlayerStatus(str, Enum):
 
 class MatchEventType(str, Enum):
     GOAL = 'goal'
-    OWN_GOAL = 'own_goal'
-    PENALTY_GOAL = 'penalty_goal'
-    MISSED_PENALTY = 'missed_penalty'
+    OWN_GOAL = 'own goal'
+    PENALTY_GOAL = 'penalty goal'
+    MISSED_PENALTY = 'missed penalty'
     YELLOW_CARD = 'yellow card'
     RED_CARD = 'red card'
     SUBSTITUTION = 'substitution'
-    VAR_DECISION = 'var_decision'
-    GOAL_CANCELLED = 'goal_cancelled'
-    PENALTY_CONFIRMED = 'penalty_confirmed'
+    VAR_DECISION = 'var decision'
+    GOAL_CANCELLED = 'goal cancelled'
+    PENALTY_CONFIRMED = 'penalty confirmed'
     INJURY = 'injury'
-    CORNER_KICK = 'corner_kick'
-    FREE_KICK = 'free_kick'
+    CORNER_KICK = 'corner kick'
+    FREE_KICK = 'free kick'
     OFFSIDE = 'offside'
+    FOUL = 'foul'
+    CORNER = 'corner'
+    PENALTY = 'penalty'
     UNKNOWN = 'Unknown'
 
 class MatchPeriod(str, Enum):
@@ -130,7 +133,8 @@ SOFASCORE_PLAYER_AVAILABILITY_MAPPING = {
     "questionable": PlayerStatus.QUESTIONABLE,
     "injured": PlayerStatus.INJURED,
     "suspended": PlayerStatus.SUSPENDED,
-    "doubt": PlayerStatus.QUESTIONABLE
+    "doubt": PlayerStatus.QUESTIONABLE,
+    "doubtful": PlayerStatus.QUESTIONABLE
 }
 
 SOFASCORE_EVENT_MAPPING = {
@@ -140,6 +144,7 @@ SOFASCORE_EVENT_MAPPING = {
     "penaltyMissed": MatchEventType.MISSED_PENALTY,
     "yellowCard": MatchEventType.YELLOW_CARD,
     "redCard": MatchEventType.RED_CARD,
+    "yellowRed": MatchEventType.RED_CARD, 
     "secondYellow": MatchEventType.RED_CARD, # secondYellow cũng là thẻ đỏ
     "substitution": MatchEventType.SUBSTITUTION,
     "varDecision": MatchEventType.VAR_DECISION,
@@ -148,7 +153,9 @@ SOFASCORE_EVENT_MAPPING = {
     "injury": MatchEventType.INJURY,
     "cornerKick": MatchEventType.CORNER_KICK,
     "freeKick": MatchEventType.FREE_KICK,
-    "offside": MatchEventType.OFFSIDE
+    "offside": MatchEventType.OFFSIDE,
+    "foul": MatchEventType.FOUL,
+    "corner": MatchEventType.CORNER,
 }
 
 SOFASCORE_PERIOD_MAPPING = {

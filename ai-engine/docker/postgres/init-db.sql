@@ -12,8 +12,8 @@ CREATE TYPE "LocationType" AS ENUM ('Home', 'Away', 'Overall');
 CREATE TYPE "MatchEventType" AS ENUM (
   'goal', 'yellow card', 'red card', 'substitution', 'foul',
   'corner', 'offside', 'penalty', 'own goal', 'missed penalty',
-  'penalty_goal', 'var_decision', 'goal_cancelled', 'penalty_confirmed',
-  'injury', 'corner_kick', 'free_kick'
+  'penalty goal', 'var decision', 'goal cancelled', 'penalty confirmed',
+  'injury', 'corner kick', 'free kick'
 );
 
 CREATE TYPE "MatchPeriod" AS ENUM ('1H', '2H', 'ET1', 'ET2', 'PEN');
@@ -100,12 +100,11 @@ CREATE UNIQUE INDEX ON "Seasons" ("league_id", "name");
 CREATE TABLE "Referees" (
   "id" SERIAL PRIMARY KEY,
   "name" VARCHAR(255) NOT NULL,
-  "date_of_birth" DATE,
+  "date_of_birth" DATE, 
   "country" VARCHAR(100),
-  "created_at" TIMESTAMP NOT NULL DEFAULT now(),
-  CONSTRAINT uq_referee_name_dob UNIQUE ("name", "date_of_birth")
+  "created_at" TIMESTAMP NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE "Referees" IS 'Information about football referees.';
+COMMENT ON TABLE "Referees" IS 'Information about football referees. Uniqueness is handled by ExternalMapping.';
 COMMENT ON COLUMN "Referees"."created_at" IS 'Record creation timestamp';
 
 -- 7. Bảng Players

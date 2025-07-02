@@ -123,6 +123,17 @@ class ParsedMatch:
     match_datetime: datetime
     home_team: ParsedTeam
     away_team: ParsedTeam
+    
+    home_goals: int
+    away_goals: int  
+    half_time_home_goals: int
+    half_time_away_goals: int   
+    home_goals_normaltime: int
+    away_goals_normaltime: int
+    second_half_home_goals: int
+    second_half_away_goals: int
+    
+    # ML fields
     status: MatchStatus
     importance: str
     status_label: int
@@ -132,18 +143,10 @@ class ParsedMatch:
     match_week: Optional[str] = None
     stadium: Optional[ParsedStadium] = None
     referee: Optional[ParsedReferee] = None
-    home_goals: Optional[int] = None
-    away_goals: Optional[int] = None
     outcome: Optional[MatchOutcome] = None
     events: List[ParsedMatchEvent] = field(default_factory=list)
     attendance: Optional[int] = None
     outcome_code: Optional[int] = None
-    half_time_home_goals: Optional[int] = None
-    half_time_away_goals: Optional[int] = None
-    second_half_home_goals: Optional[int] = None
-    second_half_away_goals: Optional[int] = None
-    home_goals_normaltime: Optional[int] = None
-    away_goals_normaltime: Optional[int] = None
     injury_time_first_half: Optional[int] = None
     injury_time_second_half: Optional[int] = None
     has_xg: Optional[bool] = None
