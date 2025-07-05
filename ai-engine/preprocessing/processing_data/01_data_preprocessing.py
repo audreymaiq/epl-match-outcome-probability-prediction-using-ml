@@ -2,7 +2,7 @@ import pandas as pd
 from pathlib import Path
 
 # --- CẤU HÌNH ĐƯỜNG DẪN ĐỘNG ---
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent 
 DATA_DIR = PROJECT_ROOT / "data" / "raw"
 PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
@@ -13,7 +13,8 @@ def main():
     1. Tải các file CSV.
     2. Chèn cột 'Season' vào vị trí thứ hai.
     3. Hợp nhất tất cả thành một DataFrame.
-    4. Lưu kết quả ra file mới.
+    4. Chuẩn hóa cột Date và sắp xếp dữ liệu.
+    5. Lưu kết quả ra file mới.
     """
     print("--- BƯỚC 1: TẢI VÀ HỢP NHẤT DỮ LIỆU THÔ ---")
     print(f"Đọc dữ liệu từ: {DATA_DIR}")
@@ -32,21 +33,21 @@ def main():
     all_seasons_dfs = []
     for file_path in csv_files:
         try:
-            df = pd.read_csv(file_path, low_memory=False, encoding='ISO-8859-1')
+            # =================================================================
+            # === THAY ĐỔI QUAN TRỌNG NHẤT ĐỂ SỬA LỖI BOM ===
+            # Sử dụng encoding='utf-8-sig' để Pandas tự động phát hiện và loại bỏ BOM
+            df = pd.read_csv(file_path, low_memory=False, encoding='utf-8-sig')
+            # =================================================================
             
-            # --- THAY ĐỔI Ở ĐÂY ---
-            # Lấy tên mùa giải từ tên file
-            season_name = file_path.stem
+            # Bước dọn dẹp khoảng trắng vẫn nên giữ lại để phòng ngừa
+            df.columns = [col.strip() for col in df.columns]
+
+            season_name = file_path.stem.replace('season_', '')
             
-            # Kiểm tra xem cột 'Div' có tồn tại không để xác định vị trí chèn
             if 'Div' in df.columns:
-                # Chèn cột 'Season' vào vị trí 1 (ngay sau cột 'Div' ở vị trí 0)
                 df.insert(1, 'Season', season_name)
-                print(f"  - Đã đọc và chèn cột 'Season' vào sau 'Div' cho file: {file_path.name}")
             else:
-                # Nếu không có cột 'Div', chèn 'Season' vào vị trí đầu tiên
                 df.insert(0, 'Season', season_name)
-                print(f"  - CẢNH BÁO: Không tìm thấy cột 'Div'. Chèn 'Season' vào đầu cho file: {file_path.name}")
             
             all_seasons_dfs.append(df)
             
@@ -61,16 +62,37 @@ def main():
     print(f"\nĐã hợp nhất dữ liệu thành công.")
     print(f"DataFrame tổng hợp có {len(combined_df)} dòng và {len(combined_df.columns)} cột.")
 
-    # --- LƯU KẾT QUẢ ---
-    output_filename = "01_combined_seasons.csv"
+    print("\n--- Bắt đầu chuẩn hóa cột Date ---")
+    if 'Date' in combined_df.columns:
+        combined_df['Date'] = pd.to_datetime(combined_df['Date'], dayfirst=True, errors='coerce')
+        rows_before_drop = len(combined_df)
+        combined_df.dropna(subset=['Date'], inplace=True)
+        rows_after_drop = len(combined_df)
+        if rows_before_drop > rows_after_drop:
+            print(f"Đã xóa {rows_before_drop - rows_after_drop} dòng có định dạng ngày không hợp lệ.")
+        print("Đã chuẩn hóa cột 'Date' sang định dạng datetime.")
+    else:
+        print("CẢNH BÁO: Không tìm thấy cột 'Date' để chuẩn hóa.")
+
+    print("\n--- Bắt đầu sắp xếp dữ liệu ---")
+    if 'Date' in combined_df.columns:
+        combined_df = combined_df.sort_values(by='Date').reset_index(drop=True)
+        print("Đã sắp xếp toàn bộ dữ liệu theo ngày tháng.")
+    else:
+        print("CẢNH BÁO: Không thể sắp xếp vì không có cột 'Date'.")
+
+    output_filename = "combined_seasons.csv"
     output_path = PROCESSED_DATA_DIR / output_filename
-    
     combined_df.to_csv(output_path, index=False)
     
     print("\n--- QUÁ TRÌNH HOÀN TẤT! ---")
-    print(f"Dữ liệu thô đã được hợp nhất và lưu tại: {output_path}")
-    print("Các cột đầu tiên của file kết quả:")
-    print(combined_df.head().iloc[:, :5]) # In ra 5 cột đầu tiên của 5 dòng đầu
+    print(f"Dữ liệu đã được hợp nhất, chuẩn hóa và lưu tại: {output_path}")
+    print("Các cột đầu tiên của file kết quả (đã sắp xếp):")
+    print("--- 5 dòng đầu tiên (cũ nhất) ---")
+    print(combined_df.head().iloc[:, :5])
+    print("\n--- 5 dòng cuối cùng (mới nhất) ---")
+    print(combined_df.tail().iloc[:, :5])
+
 
 if __name__ == "__main__":
     main()
