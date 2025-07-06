@@ -1,0 +1,38 @@
+{
+    "model_name": "best_lr_pipeline.pkl",
+    "accuracy": 0.5947368421052631,
+    "log_loss": 0.9101435584928971,
+    "classification_report": {
+        "A": {
+            "precision": 0.5664335664335665,
+            "recall": 0.6585365853658537,
+            "f1-score": 0.6090225563909775,
+            "support": 123.0
+        },
+        "D": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1-score": 0.0,
+            "support": 82.0
+        },
+        "H": {
+            "precision": 0.6118143459915611,
+            "recall": 0.8285714285714286,
+            "f1-score": 0.7038834951456311,
+            "support": 175.0
+        },
+        "accuracy": 0.5947368421052631,
+        "macro avg": {
+            "precision": 0.3927493041417092,
+            "recall": 0.49570267131242746,
+            "f1-score": 0.43763535051220287,
+            "support": 380.0
+        },
+        "weighted avg": {
+            "precision": 0.4651022084732944,
+            "recall": 0.5947368421052631,
+            "f1-score": 0.5212878581225675,
+            "support": 380.0
+        }
+    }
+}
