@@ -1,3 +1,7 @@
+"""
+Dùng mô hình Logistic Regression
+"""
+
 import pandas as pd
 import joblib
 import json
@@ -28,8 +32,8 @@ def main():
     
     # 1. Đọc và kết hợp dữ liệu
     try:
-        train_df = pd.read_csv(PROCESSED_DATA_DIR / "train_data.csv", parse_dates=['Date'])
-        val_df = pd.read_csv(PROCESSED_DATA_DIR / "val_data.csv", parse_dates=['Date'])
+        train_df = pd.read_csv(PROCESSED_DATA_DIR / "train_data_v2.csv", parse_dates=['Date'])
+        val_df = pd.read_csv(PROCESSED_DATA_DIR / "val_data_v2.csv", parse_dates=['Date'])
         tuning_df = pd.concat([train_df, val_df], ignore_index=True).sort_values('Date')
         print("1. Đã kết hợp dữ liệu train và validation để tuning.")
     except FileNotFoundError as e:
@@ -40,11 +44,11 @@ def main():
     X_tuning, y_tuning_raw = prepare_data(tuning_df)
     
     try:
-        le = joblib.load(MODEL_DIR / "baseline_models" / "label_encoder.pkl")
+        le = joblib.load(MODEL_DIR / "baseline_models_v2" / "label_encoder.pkl")
         y_tuning = le.transform(y_tuning_raw)
         print("2. Đã chuẩn bị dữ liệu và tải LabelEncoder.")
     except FileNotFoundError:
-        print("Lỗi: Không tìm thấy label_encoder.pkl. Vui lòng chạy script 10 trước.")
+        print("Lỗi: Không tìm thấy label_encoder.pkl. Vui lòng chạy script 09 trước.")
         return
 
     # 3. Thiết lập chiến lược Cross-Validation theo thời gian
@@ -90,14 +94,14 @@ def main():
     # Bỏ tiền tố 'model__'
     best_params_to_save = {k.split('__')[1]: v for k, v in grid_search.best_params_.items()}
 
-    with open(BEST_MODEL_DIR / "best_lr_params.json", 'w') as f:
+    with open(BEST_MODEL_DIR / "best_lr_params_v2.json", 'w') as f:
         json.dump(best_params_to_save, f, indent=4)
-    print(f"Đã lưu bộ tham số tại: {BEST_MODEL_DIR / 'best_lr_params.json'}")
+    print(f"Đã lưu bộ tham số tại: {BEST_MODEL_DIR / 'best_lr_params_v2.json'}")
 
     # Lưu pipeline tốt nhất (bao gồm cả scaler đã được huấn luyện trên toàn bộ dữ liệu tuning)
     best_pipeline = grid_search.best_estimator_
-    joblib.dump(best_pipeline, BEST_MODEL_DIR / "best_lr_pipeline.pkl")
-    print(f"Đã lưu pipeline tốt nhất tại: {BEST_MODEL_DIR / 'best_lr_pipeline.pkl'}")
+    joblib.dump(best_pipeline, BEST_MODEL_DIR / "best_lr_pipeline_v2.pkl")
+    print(f"Đã lưu pipeline tốt nhất tại: {BEST_MODEL_DIR / 'best_lr_pipeline_v2.pkl'}")
     
     print("\n--- HOÀN TẤT ---")
 

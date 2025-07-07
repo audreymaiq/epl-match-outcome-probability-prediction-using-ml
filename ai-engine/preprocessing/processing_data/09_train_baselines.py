@@ -17,7 +17,7 @@ from lightgbm import LGBMClassifier
 # --- CẤU HÌNH ---
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
-MODEL_DIR = BASE_DIR / "models" / "baseline_models"
+MODEL_DIR = BASE_DIR / "models" / "baseline_models_v2"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 # Các cột cần loại bỏ trước khi huấn luyện
@@ -37,8 +37,8 @@ def main():
     
     # 1. Đọc dữ liệu
     try:
-        train_df = pd.read_csv(PROCESSED_DATA_DIR / "train_data.csv", parse_dates=['Date'])
-        val_df = pd.read_csv(PROCESSED_DATA_DIR / "val_data.csv", parse_dates=['Date'])
+        train_df = pd.read_csv(PROCESSED_DATA_DIR / "train_data_v2.csv", parse_dates=['Date'])
+        val_df = pd.read_csv(PROCESSED_DATA_DIR / "val_data_v2.csv", parse_dates=['Date'])
         print("1. Đã đọc thành công dữ liệu train và validation.")
     except FileNotFoundError as e:
         print(f"Lỗi: không tìm thấy file dữ liệu. Vui lòng chạy script 08 trước. Chi tiết: {e}")

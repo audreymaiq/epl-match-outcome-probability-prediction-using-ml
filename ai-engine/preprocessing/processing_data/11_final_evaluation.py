@@ -61,9 +61,9 @@ def main():
     # 1. Tải các thành phần cần thiết
     try:
         print("1. Tải mô hình, dữ liệu test và label encoder...")
-        pipeline = joblib.load(BEST_MODEL_DIR / "best_lr_pipeline.pkl")
-        test_df = pd.read_csv(PROCESSED_DATA_DIR / "test_data.csv", parse_dates=['Date'])
-        le = joblib.load(MODEL_DIR / "baseline_models" / "label_encoder.pkl")
+        pipeline = joblib.load(BEST_MODEL_DIR / "best_lr_pipeline_v2.pkl")
+        test_df = pd.read_csv(PROCESSED_DATA_DIR / "test_data_v2.csv", parse_dates=['Date'])
+        le = joblib.load(MODEL_DIR / "baseline_models_v2" / "label_encoder.pkl")
         print("   -> Tải thành công.")
     except FileNotFoundError as e:
         print(f"LỖI: Không tìm thấy file cần thiết. Vui lòng chạy các script trước. Chi tiết: {e}")
@@ -93,8 +93,8 @@ def main():
     print(f"   -> Log Loss: {loss:.4f}")
     print("\nBáo cáo chi tiết (Classification Report):\n", report_text)
     # ... (Lưu báo cáo JSON) ...
-    final_evaluation = {'model_name': 'best_lr_pipeline.pkl', 'accuracy': accuracy, 'log_loss': loss, 'classification_report': report_dict}
-    with open(REPORTS_DIR / "final_evaluation_report.json", 'w') as f: json.dump(final_evaluation, f, indent=4)
+    final_evaluation = {'model_name': 'best_lr_pipeline_v2.pkl', 'accuracy': accuracy, 'log_loss': loss, 'classification_report': report_dict}
+    with open(REPORTS_DIR / "final_evaluation_report_v2.json", 'w') as f: json.dump(final_evaluation, f, indent=4)
     print("   -> Báo cáo đánh giá đã được lưu vào file JSON.")
     
     # 5. Phân tích Ma trận nhầm lẫn
@@ -128,7 +128,7 @@ def main():
     analysis_df['Is_Correct'] = (analysis_df['FTR'] == analysis_df['Predicted_FTR']).astype(int)
     
     # Lưu file phân tích
-    analysis_output_path = REPORTS_DIR / "prediction_analysis.csv"
+    analysis_output_path = REPORTS_DIR / "prediction_analysis_v2.csv"
     analysis_df.to_csv(analysis_output_path, index=False)
     
     print(f"   -> Đã lưu file phân tích chi tiết tại: '{analysis_output_path}'")
