@@ -1,448 +1,360 @@
-# elt_pipeline/transform/sofascore_transformer.py
-
-"""
-SofaScore ETL Pipeline: Transformer.
-Chịu trách nhiệm chuyển đổi JSON thô thành các object dataclass đã chuẩn hóa.
-Hoạt động như một "Rule-based Engine", đọc quy tắc từ các file config.
-"""
+# ai-engine\elt_pipeline\transform\sofascore_transformer.py
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
-# --- Import các thành phần kiến trúc ---
+# --- Import các cấu trúc dữ liệu và hằng số đã được chuẩn hóa ---
 from .data_structures import (
-    ParsedMatch, ParsedTeam, ParsedStadium, ParsedReferee, ParsedLeague,
-    ParsedSeason, ParsedPlayer, ParsedMatchEvent
+    ParsedMatchBundle, ParsedMatch, ParsedLeague, ParsedSeason, ParsedTeam, 
+    ParsedStadium, ParsedReferee, ParsedPlayer, ParsedMatchEvent, ParsedLineup, 
+    ParsedSquadAvailability, ParsedMatchPlayerStats, ParsedMatchTeamStats
 )
-from utils.dict_helpers import get_nested_value
-from config.field_mappings import (
-    get_field_mapping, get_special_conversions, convert_birthdate,
-    unified_event_type_mapper, unified_period_mapper, unified_position_mapper,
-    unified_match_status_mapper, unified_match_outcome_mapper
+from config.core_constants import (
+    get_match_status_from_sofascore, get_player_position_from_sofascore, 
+    get_match_outcome_from_sofascore, get_player_availability_from_sofascore, 
+    get_event_type_from_sofascore, MatchPeriod, MatchEventType
 )
 from config.business_constants import (
-    MatchBusinessLogic, SeasonBusinessLogic, RefereeBusinessLogic,
-    MLOutcomeLabels, encode_match_status
+    team_name_normalizer, SeasonBusinessLogic
+)
+from config.field_mappings import (
+    convert_timestamp_to_utc_datetime, convert_timestamp_to_date, 
+    convert_possession_to_decimal
 )
 
 logger = logging.getLogger(__name__)
 
-
 class SofaScoreTransformer:
     """
-    Chuyển đổi dữ liệu thô từ SofaScore API thành các đối tượng dữ liệu có cấu trúc,
-    đã được làm sạch, chuẩn hóa và làm giàu (enriched).
+    Chuyển đổi dữ liệu thô từ SofaScore API thành các đối tượng ParsedMatchBundle có cấu trúc.
+    Lớp này được thiết kế để xử lý toàn bộ "bundle" dữ liệu của một trận đấu.
     """
 
-    def __init__(self, api_type: str = 'sofascore'):
-        """
-        Khởi tạo Transformer và nạp các bộ quy tắc từ file cấu hình một lần duy nhất.
-        """
-        logger.info(f"Initializing SofaScoreTransformer for api_type='{api_type}'")
-        self.api_type = api_type
-        
-        field_map = get_field_mapping(api_type)
-        self.conversions = get_special_conversions(api_type)
+    def __init__(self):
+        """Khởi tạo Transformer. Lớp này không có trạng thái (stateless)."""
+        pass
 
-        # === BƯỚC TỰ KIỂM TRA MAPPING ===
-        dest_field_counts = {}
-        for source, dest in field_map.items():
-            dest_field_counts[dest] = dest_field_counts.get(dest, 0) + 1
-        
-        # Tìm tất cả các tên đích bị trùng lặp
-        duplicates = {dest: count for dest, count in dest_field_counts.items() if count > 1}
-        
-        if duplicates:
-            error_messages = []
-            for dest, count in duplicates.items():
-                # Tìm lại tất cả các nguồn đang trỏ đến đích bị trùng
-                sources = [source for source, d in field_map.items() if d == dest]
-                msg = f"Destination field '{dest}' is mapped by {count} sources: {sources}"
-                error_messages.append(msg)
-                logger.error(msg)
-            
-            # Ném ra một lỗi rõ ràng để pipeline dừng lại và báo cho bạn biết
-            raise ValueError(f"Duplicate field mappings detected! {'; '.join(error_messages)}")
-        
-        self.field_map = field_map
-        logger.info("Field mappings validated successfully. No duplicate destinations found.")
-
-    def _validate_required_fields(self, flat_data: Dict[str, Any]) -> None:
+    @staticmethod
+    def _get_nested_value(data: Dict, path: str, default: Any = None) -> Any:
         """
-        Validate các field bắt buộc trước khi tạo ParsedMatch.
+        Lấy giá trị từ một dictionary lồng nhau một cách an toàn.
+        Ví dụ path: 'roundInfo.round'
         """
-        required_fields = ['match_id', 'home_team_id', 'away_team_id', 'home_team_name', 'away_team_name']
-        missing_fields = [field for field in required_fields if not flat_data.get(field)]
-        
-        if missing_fields:
-            raise ValueError(f"Missing required fields: {missing_fields}")
+        keys = path.split('.')
+        value = data
+        for key in keys:
+            if not isinstance(value, dict) or key not in value:
+                return default
+            value = value.get(key)
+        return value
 
-    def _apply_mapping_rules(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Private method: Áp dụng các quy tắc từ `field_mappings.py` để tạo ra một
-        dict "phẳng", đã được đổi tên trường và chuyển đổi kiểu dữ liệu cơ bản.
-        """
-        flat_data = {}
-        for source_path, dest_field in self.field_map.items():
-            raw_value = get_nested_value(raw_data, source_path)
-            
-            if source_path in self.conversions:
-                try:
-                    conversion_func = self.conversions[source_path]
-                    flat_data[dest_field] = conversion_func(raw_value)
-                except Exception as e:
-                    logger.warning(f"Conversion failed for {source_path}: {e}")
-                    flat_data[dest_field] = raw_value
-            else:
-                flat_data[dest_field] = raw_value
-        return flat_data
-
-    def transform_match_and_events(
-        self,
-        raw_match_data: Dict[str, Any],
-        raw_events: Optional[List[Dict[str, Any]]] = None
-    ) -> Optional[ParsedMatch]:
-
-        if not raw_match_data or not isinstance(raw_match_data, dict):
-            logger.warning("Invalid raw_match_data provided.")
+    def _transform_player(self, player_data: Optional[Dict]) -> Optional[ParsedPlayer]:
+        """Chuyển đổi dữ liệu thô của một cầu thủ thành đối tượng ParsedPlayer."""
+        if not player_data or not player_data.get('id'):
             return None
+        
+        return ParsedPlayer(
+            external_id=player_data.get('id'),
+            name=player_data.get('name'),
+            position=get_player_position_from_sofascore(player_data.get('position')),
+            date_of_birth=convert_timestamp_to_date(self._get_nested_value(player_data, 'dateOfBirthTimestamp')),
+            nationality=self._get_nested_value(player_data, 'country.name'),
+            height=player_data.get('height')
+        )
 
-        flat_data = {}
-        try:
-
-            # BƯỚC 1: ÁP DỤNG MAPPING - Tạo ra một dict phẳng, đã đổi tên
-            flat_data = self._apply_mapping_rules(raw_match_data)
-
-            flat_data['home_goals'] = flat_data.get('home_goals_normaltime')
-            flat_data['away_goals'] = flat_data.get('away_goals_normaltime')
-
-            self._validate_required_fields(flat_data)
-
-            # BƯỚC 2: TẠO CÁC OBJECT CON (LEAGUE, SEASON, STADIUM, REFEREE)
-            parsed_league = ParsedLeague(
-                external_id=self._safe_int_conversion(flat_data.get('league_id')),
-                unique_tournament_id=self._safe_int_conversion(flat_data.get('unique_tournament_id')),
-                name=flat_data['league_name'],
-                country=flat_data['league_country'],
-                priority=self._safe_int_conversion(flat_data.get('tournament_priority'))
-            )
-            
-            start_year = SeasonBusinessLogic.extract_year_from_season(
-                flat_data.get('season_name') or flat_data.get('season_year_str')
-            )
-            if start_year is None: raise ValueError("Cannot determine season year.")
-            parsed_season = ParsedSeason(
-                external_id=self._safe_int_conversion(flat_data.get('season_id')),
-                name=f"{start_year}/{str(start_year + 1)[-2:]}",
-                start_year=start_year, end_year=start_year + 1, league=parsed_league
-            )
-            
-            match_stadium = ParsedStadium(
-                external_id=self._safe_int_conversion(flat_data.get('match_venue_id')),
-                name=flat_data.get('match_venue_name'),
-                city=flat_data.get('match_venue_city'),
-                capacity=self._safe_int_conversion(flat_data.get('match_venue_capacity')),
-                latitude=flat_data.get('match_venue_latitude'),
-                longitude=flat_data.get('match_venue_longitude'),
-            ) if flat_data.get('match_venue_id') else None
-            
-            referee = ParsedReferee(
-                external_id=self._safe_int_conversion(flat_data.get('referee_id')),
-                name=flat_data.get('referee_name'),
-                country=flat_data.get('referee_country'),
-                total_yellow_cards=self._safe_int_conversion(flat_data.get('referee_total_yellow_cards')),
-                total_red_cards=self._safe_int_conversion(flat_data.get('referee_total_red_cards')),
-                total_yellow_red_cards=self._safe_int_conversion(flat_data.get('referee_total_yellow_red_cards')),
-                total_games_officiated=self._safe_int_conversion(flat_data.get('referee_total_games'))
-            ) if flat_data.get('referee_id') else None
-            
-            # BƯỚC 3: TẠO OBJECT TEAM (ĐỘI NHÀ VÀ ĐỘI KHÁCH)
-            home_team_stadium = ParsedStadium(
-                external_id=self._safe_int_conversion(flat_data.get('home_team_venue_id')),
-                name=flat_data.get('home_team_venue_name'),
-                city=flat_data.get('home_team_venue_city'),
-                capacity=self._safe_int_conversion(flat_data.get('home_team_venue_capacity')),
-                latitude=flat_data.get('home_team_venue_latitude'),
-                longitude=flat_data.get('home_team_venue_longitude')
-            ) if flat_data.get('home_team_venue_id') else None
-
-            home_foundation_date = flat_data.get('home_team_established_ts')
-            home_team = ParsedTeam(
-                external_id=self._safe_int_conversion(flat_data['home_team_id']),
-                name=MatchBusinessLogic.normalize_team_name(flat_data.get('home_team_name')),
-                short_name=flat_data.get('home_team_short_name'),
-                name_code=flat_data.get('home_team_code'),
-                full_name=flat_data.get('home_team_full_name'),
-                stadium=home_team_stadium,
-                established_year=home_foundation_date.year if home_foundation_date else None,
-                logo_url=f"https://api.sofascore.com/api/v1/team/{flat_data['home_team_id']}/image",
-                fan_count=self._safe_int_conversion(flat_data.get('home_team_fan_count')),
-                manager_id=self._safe_int_conversion(flat_data.get('home_team_manager_id')),
-                manager_name=flat_data.get('home_team_manager_name'),
-                manager_country=flat_data.get('home_team_manager_country'),
-                primary_color=flat_data.get('home_team_primary_color'),
-                secondary_color=flat_data.get('home_team_secondary_color')
-            )
-            
-            away_team_stadium = ParsedStadium(
-                external_id=self._safe_int_conversion(flat_data.get('away_team_venue_id')),
-                name=flat_data.get('away_team_venue_name'),
-                city=flat_data.get('away_team_venue_city'),
-                capacity=self._safe_int_conversion(flat_data.get('away_team_venue_capacity')),
-                latitude=flat_data.get('away_team_venue_latitude'),
-                longitude=flat_data.get('away_team_venue_longitude'),
-            ) if flat_data.get('away_team_venue_id') else None            
-
-            away_foundation_date = flat_data.get('away_team_established_ts')
-            away_team = ParsedTeam(
-                external_id=self._safe_int_conversion(flat_data['away_team_id']),
-                name=MatchBusinessLogic.normalize_team_name(flat_data.get('away_team_name')),
-                short_name=flat_data.get('away_team_short_name'),
-                name_code=flat_data.get('away_team_code'),
-                full_name=flat_data.get('away_team_full_name'),
-                stadium=away_team_stadium,
-                established_year=away_foundation_date.year if away_foundation_date else None,
-                logo_url=f"https://api.sofascore.com/api/v1/team/{flat_data['away_team_id']}/image",
-                fan_count=self._safe_int_conversion(flat_data.get('away_team_fan_count')),
-                manager_id=self._safe_int_conversion(flat_data.get('away_team_manager_id')),
-                manager_name=flat_data.get('away_team_manager_name'),
-                manager_country=flat_data.get('away_team_manager_country'),
-                primary_color=flat_data.get('away_team_primary_color'),
-                secondary_color=flat_data.get('away_team_secondary_color')
-            )
-
-            # BƯỚC 4: LÀM GIÀU DỮ LIỆU (ENRICHMENT)
-            status = unified_match_status_mapper(flat_data.get('status_description'), self.api_type)
-            outcome = unified_match_outcome_mapper(str(flat_data.get('outcome_code')), self.api_type)
-            
-            if status is None:
-                logger.error(
-                    f"Skipping match due to unmappable status: "
-                    f"'{flat_data.get('status_description')}'",
-                    extra={"match_id": flat_data.get('match_id')}
-                )
-                return None # Loại bỏ hoàn toàn trận đấu này
-            
-            # Nếu trận đấu đã kết thúc mà không có outcome, cũng có thể là không hợp lệ
-            if status == "FINISHED" and outcome is None:
-                logger.warning(
-                    f"Match {flat_data.get('match_id')} is FINISHED but has unmappable outcome code: "
-                    f"'{flat_data.get('outcome_code')}'. Will try to derive from score."
-                )
-                # Sẽ được xử lý ở bước kiểm tra tính nhất quán sau
-                pass
-
-            importance = MatchBusinessLogic.determine_match_importance(home_team, away_team).value
-            status_label = encode_match_status(status)
-            outcome_label = MLOutcomeLabels.from_outcome(outcome) # Sẽ trả về -1 nếu outcome là None
-            
-            # BƯỚC 5: LẮP RÁP OBJECT PARSEDMATCH
-            #  LOGIC TÍNH TOÁN TỶ SỐ HIỆP 2  
-            ht_home_goals = self._safe_int_conversion(flat_data.get('half_time_home_goals'), default=0)
-            ht_away_goals = self._safe_int_conversion(flat_data.get('half_time_away_goals'), default=0)
-
-            # Sử dụng 'home_goals_normaltime' để đảm bảo tính nhất quán, vì nó luôn có giá trị
-            ft_home_goals = self._safe_int_conversion(flat_data.get('home_goals_normaltime'), default=0)
-            ft_away_goals = self._safe_int_conversion(flat_data.get('away_goals_normaltime'), default=0)
-
-            sh_home_goals = ft_home_goals - ht_home_goals
-            sh_away_goals = ft_away_goals - ht_away_goals
-            
-            match = ParsedMatch(
-                # Các trường bắt buộc
-                external_id=self._safe_int_conversion(flat_data.get('match_id')),
-                season=parsed_season,
-                match_datetime=flat_data.get('match_timestamp'),
-                home_team=home_team,
-                away_team=away_team,
-                status=status,
-                importance=importance,
-                status_label=status_label,
-                outcome_label=outcome_label,
-                
-                # Các trường tùy chọn
-                match_week=str(flat_data.get('round')) if flat_data.get('round') else None,
-                attendance=self._safe_int_conversion(flat_data.get('attendance')),
-                stadium=match_stadium,
-                referee=referee,
-                outcome=outcome,
-                outcome_code=self._safe_int_conversion(flat_data.get('outcome_code')),
-                home_goals=ft_home_goals,
-                away_goals=ft_away_goals,
-                half_time_home_goals=ht_home_goals,
-                half_time_away_goals=ht_away_goals,
-                second_half_home_goals=sh_home_goals,
-                second_half_away_goals=sh_away_goals,
-                home_goals_normaltime=ft_home_goals,
-                away_goals_normaltime=ft_away_goals,
-                injury_time_first_half=self._safe_int_conversion(flat_data.get('injury_time_first_half')),
-                injury_time_second_half=self._safe_int_conversion(flat_data.get('injury_time_second_half')),
-                has_xg=flat_data.get('has_xg'),
-                has_event_player_statistics=flat_data.get('has_event_player_statistics'),
-                # `events` sẽ được thêm ở bước sau
-            )
-
-            # BƯỚC 6: KIỂM TRA TÍNH NHẤT QUÁN & XỬ LÝ SỰ KIỆN
-            if match.status == "FINISHED" and match.home_goals is not None and match.away_goals is not None:
-                actual_outcome = MatchBusinessLogic.determine_outcome_from_score(
-                    match.home_goals, match.away_goals
-                )
-                
-                # Nếu outcome ban đầu là None, giờ chúng ta có thể điền nó vào
-                if match.outcome is None:
-                    logger.info(f"Derived outcome '{actual_outcome.value}' for match {match.external_id}.")
-                    match.outcome = actual_outcome
-                    match.outcome_label = MLOutcomeLabels.from_outcome(actual_outcome)
-                    
-                # Kịch bản 2: API cung cấp kết quả, nhưng nó không khớp với tỷ số
-                elif actual_outcome != match.outcome:
-                    logger.warning(
-                        f"Outcome mismatch for match {match.external_id}: "
-                        f"API reports '{match.outcome.value}' but score {match.home_goals}-{match.away_goals} "
-                        f"implies '{actual_outcome.value}'. Trusting score-based outcome."
-                    )
-                    match.outcome = actual_outcome
-                    match.outcome_label = MLOutcomeLabels.from_outcome(actual_outcome)
-
-            if raw_events:
-                player_cache: Dict[int, ParsedPlayer] = {}
-                match.events = self._transform_single_match_events(
-                    raw_events, match.home_team, match.away_team, player_cache
-                )
-                player_cache.clear()
-
-            logger.info(f"Successfully transformed match {match.external_id} with {len(match.events)} events.")
-            return match
-
-        except (ValueError, KeyError) as e:
-            logger.error(f"Error transforming match {flat_data.get('match_id', 'Unknown')}: {e}", exc_info=True)
+    def _transform_team(self, team_data: Optional[Dict]) -> Optional[ParsedTeam]:
+        """Chuyển đổi dữ liệu thô của một đội bóng thành đối tượng ParsedTeam."""
+        if not team_data or not team_data.get('id'):
             return None
-        except Exception as e:
-            logger.error(f"Unexpected error transforming match {flat_data.get('match_id', 'Unknown')}: {e}", exc_info=True)
-            return None
+        
+        team_id = team_data.get('id')
+        return ParsedTeam(
+            external_id=team_id,
+            name=team_name_normalizer.normalize(team_data.get('name')),
+            short_name=team_data.get('shortName'),
+            logo_url=f"https://api.sofascore.com/api/v1/team/{team_id}/image",
+            name_code=team_data.get('nameCode'),
+            full_name=team_data.get('fullName'),
+            fan_count=team_data.get('userCount'),
+            manager_name=self._get_nested_value(team_data, 'manager.name'),
+            manager_id=self._get_nested_value(team_data, 'manager.id'),
+            primary_color=self._get_nested_value(team_data, 'teamColors.primary'),
+            secondary_color=self._get_nested_value(team_data, 'teamColors.secondary')
+        )
 
-    def _safe_int_conversion(self, value: Any, default: Optional[int] = None) -> Optional[int]:
-        """
-        Safely convert value to int, return a default value if conversion fails.
-        """
-        if value is None:
-            return default
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            logger.warning(f"Could not convert value '{value}' to int, using default '{default}'")
-            return default
-
-    def _get_or_create_player_from_cache(
-        self, 
-        player_data: Optional[Dict[str, Any]], 
-        player_cache: Dict[int, ParsedPlayer]
-    ) -> Optional[ParsedPlayer]:
-        """
-        Lấy hoặc tạo một object ParsedPlayer sử dụng cache trong phạm vi một trận đấu.
-        FIX: Không mutate object trong cache để tránh side effects.
-        """
-        if not player_data or not isinstance(player_data, dict) or 'id' not in player_data:
+    def _transform_stadium(self, venue_data: Optional[Dict]) -> Optional[ParsedStadium]:
+        """Chuyển đổi dữ liệu thô của sân vận động thành đối tượng ParsedStadium."""
+        if not venue_data or not venue_data.get('id'):
             return None
             
-        player_id = self._safe_int_conversion(player_data['id'])
-        if player_id is None:
-            return None
+        return ParsedStadium(
+            external_id=venue_data.get('id'),
+            name=venue_data.get('name'),
+            city=self._get_nested_value(venue_data, 'city.name'),
+            capacity=self._get_nested_value(venue_data, 'stadium.capacity'),
+            latitude=self._get_nested_value(venue_data, 'venueCoordinates.latitude'),
+            longitude=self._get_nested_value(venue_data, 'venueCoordinates.longitude')
+        )
 
-        # Return existing player from cache without mutation
-        if player_id in player_cache:
-            return player_cache[player_id]
-
-        # Create new player object
-        try:
-            new_player = ParsedPlayer(
-                external_id=player_id,
-                name=player_data.get('name'),
-                position=unified_position_mapper(player_data.get('position'), self.api_type),
-                nationality=get_nested_value(player_data, 'country.name'),
-                date_of_birth=convert_birthdate(player_data.get('dateOfBirthTimestamp')),
-                height=player_data.get('height')
-            )
-            
-            # Cache the new player
-            player_cache[player_id] = new_player
-            return new_player
-            
-        except Exception as e:
-            logger.error(f"Failed to create player object: {e}", extra={"player_data": player_data})
+    def _transform_referee(self, referee_data: Optional[Dict]) -> Optional[ParsedReferee]:
+        """Chuyển đổi dữ liệu thô của trọng tài thành đối tượng ParsedReferee."""
+        if not referee_data or not referee_data.get('id'):
             return None
-    
-    def _transform_single_match_events(
-        self,
-        raw_events_data: List[Dict[str, Any]],
-        home_team: "ParsedTeam",
-        away_team: "ParsedTeam",
-        player_cache: Dict[int, "ParsedPlayer"]
-    ) -> List[ParsedMatchEvent]:
-        """
-        Private helper: Biến đổi một danh sách các sự kiện thô cho một trận đấu.
-        --- PHIÊN BẢN TỐI ƯU VÀ HOÀN THIỆN ---
-        - Tuân thủ kiến trúc bằng cách gọi các hàm unified_*_mapper.
-        - Xử lý lỗi cho từng sự kiện để tăng độ tin cậy.
-        - Giữ lại raw_event_data để phục vụ phân tích sâu.
-        """
-        if not raw_events_data:
-            return []
+            
+        return ParsedReferee(
+            external_id=referee_data.get('id'),
+            name=referee_data.get('name'),
+            country=self._get_nested_value(referee_data, 'country.name'),
+            total_yellow_cards=referee_data.get('yellowCards'),
+            total_red_cards=referee_data.get('redCards'),
+            total_games_officiated=referee_data.get('games')
+        )
+
+    def _transform_league_and_season(self, match_data: Dict) -> Tuple[Optional[ParsedLeague], Optional[ParsedSeason]]:
+        """Chuyển đổi dữ liệu giải đấu và mùa giải từ dữ liệu trận đấu."""
+        tournament_data = match_data.get('tournament')
+        season_data = match_data.get('season')
+
+        if not tournament_data or not season_data:
+            return None, None
+
+        league = ParsedLeague(
+            external_id=self._get_nested_value(tournament_data, 'uniqueTournament.id', tournament_data.get('id')),
+            name=self._get_nested_value(tournament_data, 'uniqueTournament.name', tournament_data.get('name')),
+            country=self._get_nested_value(tournament_data, 'category.name')
+        )
+
+        season_year_str = season_data.get('year')
+        start_year = SeasonBusinessLogic.extract_year_from_season(season_year_str)
+        if start_year is None:
+            logger.warning(f"Không thể trích xuất năm từ mùa giải '{season_year_str}'.")
+            return league, None
+            
+        season = ParsedSeason(
+            external_id=season_data.get('id'),
+            name=f"{start_year}/{start_year + 1}",
+            start_year=start_year,
+            end_year=start_year + 1,
+            league=league
+        )
+        return league, season
+
+    def _get_match_period(self, event_time: Optional[int], injury_times: Dict) -> MatchPeriod:
+        """Xác định hiệp đấu từ thời gian của sự kiện và thời gian bù giờ."""
+        if event_time is None: return MatchPeriod.FIRST_HALF # Mặc định an toàn
         
+        it1 = injury_times.get('injuryTime1', 0)
+        it2 = injury_times.get('injuryTime2', 0)
+        
+        if event_time <= 45 + it1: return MatchPeriod.FIRST_HALF
+        if event_time <= 90 + it2: return MatchPeriod.SECOND_HALF
+        if event_time <= 105: return MatchPeriod.EXTRA_TIME_1
+        if event_time <= 120: return MatchPeriod.EXTRA_TIME_2
+        return MatchPeriod.PENALTIES
+
+    def _transform_events(self, events_data: List[Dict], team_map: Dict[int, ParsedTeam], injury_time_data: Dict, home_team_id: int, away_team_id: int) -> List[ParsedMatchEvent]:
+        """Chuyển đổi danh sách sự kiện thô."""
         parsed_events = []
-        
-        for event_data in raw_events_data:
-            try:
-                # BƯỚC 1: CHUẨN HÓA CÁC GIÁ TRỊ CỐT LÕI
-                event_type = unified_event_type_mapper(get_nested_value(event_data, 'type'), self.api_type)
-                period = unified_period_mapper(get_nested_value(event_data, 'period'), self.api_type)
+        if not events_data: return []
 
-                # Bỏ qua ngay nếu sự kiện không có loại hoặc hiệp đấu hợp lệ
-                if not event_type or not period:
-                    logger.debug(f"Skipping event due to invalid type or period: {event_data.get('type')}, {event_data.get('period')}")
-                    continue
-                
-                # BƯỚC 2: XỬ LÝ CÁC THỰC THỂ LIÊN QUAN (PLAYER, TEAM)
-                
-                # Lấy object cầu thủ chính và cầu thủ liên quan (cho việc thay người)
-                # Hàm này đã có sẵn logic cache để tối ưu
-                player = self._get_or_create_player_from_cache(
-                    get_nested_value(event_data, 'player'), player_cache
-                )
-                related_player = self._get_or_create_player_from_cache(
-                    get_nested_value(event_data, 'playerOut'), player_cache
-                )
-                
-                # Xác định đội của sự kiện
-                team_side_str = get_nested_value(event_data, 'teamSide')
-                event_team = None
-                if team_side_str == 'home':
-                    event_team = home_team
-                elif team_side_str == 'away':
-                    event_team = away_team
-                
-                # BƯỚC 3: LẮP RÁP OBJECT PARSEDEVENT
-                
-                parsed_event = ParsedMatchEvent(
-                    minute=self._safe_int_conversion(get_nested_value(event_data, 'time.minute')),
+        for event in events_data:
+            incident_type = event.get('incidentType')
+            if incident_type == 'period' or not incident_type: continue
+            
+            event_type = get_event_type_from_sofascore(event)
+            if not event_type: continue
+
+            team = None
+            if event.get('isHome') is True: team = team_map.get(home_team_id)
+            elif event.get('isHome') is False: team = team_map.get(away_team_id)
+
+            player, related_player = None, None
+            if event_type == MatchEventType.SUBSTITUTION:
+                player = self._transform_player(event.get('playerOut'))
+                related_player = self._transform_player(event.get('playerIn'))
+            elif event_type in (MatchEventType.GOAL, MatchEventType.PENALTY_GOAL, MatchEventType.OWN_GOAL):
+                player = self._transform_player(event.get('player'))
+                related_player = self._transform_player(event.get('assist1'))
+            else:
+                player = self._transform_player(event.get('player'))
+
+            parsed_events.append(
+                ParsedMatchEvent(
+                    minute=event.get('time'),
                     event_type=event_type,
-                    period=period,
-                    description=get_nested_value(event_data, 'text'),
+                    team=team,
                     player=player,
                     related_player=related_player,
-                    team=event_team,
-                    raw_event_data=event_data  # Giữ lại dữ liệu thô để phân tích sâu
+                    period=self._get_match_period(event.get('time'), injury_time_data),
+                    raw_event_data=event
                 )
-                parsed_events.append(parsed_event)
-                
-            except Exception as e:
-                # Nếu có bất kỳ lỗi nào khi xử lý MỘT sự kiện, ghi log và tiếp tục
-                # Điều này làm cho pipeline trở nên mạnh mẽ hơn.
-                logger.error(
-                    f"Failed to transform a single event: {e}",
-                    exc_info=True,
-                    extra={"event_data": event_data}
-                )
-                continue
-        
+            )
         return parsed_events
+
+    def _transform_lineups_and_player_stats(
+        self, lineups_data: Optional[Dict], team_map: Dict[int, ParsedTeam]
+    ) -> Tuple[List[ParsedLineup], List[ParsedMatchPlayerStats]]:
+        """Chuyển đổi đội hình và thống kê cầu thủ từ cùng một nguồn dữ liệu."""
+        parsed_lineups, parsed_player_stats = [], []
+        if not lineups_data: return [], []
+
+        for team_side in ['home', 'away']:
+            player_list = self._get_nested_value(lineups_data, f"{team_side}.players", [])
+            team_id = self._get_nested_value(player_list, '0.teamId')
+            team = team_map.get(team_id) if team_id else None
+
+            for player_entry in player_list:
+                player = self._transform_player(player_entry.get('player'))
+                if not player or not team: continue
+                
+                is_starter = not player_entry.get('substitute', True)
+                
+                parsed_lineups.append(ParsedLineup(
+                    player=player, team=team, is_starter=is_starter,
+                    shirt_number=player_entry.get('shirtNumber'),
+                    is_captain=player_entry.get('captain', False),
+                    position_in_lineup=player_entry.get('position')
+                ))
+
+                stats = player_entry.get('statistics', {})
+                if 'minutesPlayed' in stats:
+                    parsed_player_stats.append(ParsedMatchPlayerStats(
+                        player=player, team=team, is_starter=is_starter,
+                        minutes_played=stats.get('minutesPlayed', 0),
+                        goals=stats.get('goals', 0),
+                        assists=stats.get('goalAssist', 0),
+                        shots=stats.get('totalScoringAttempt', 0),
+                        shots_on_target=stats.get('onTargetScoringAttempt', 0),
+                        passes=stats.get('totalPass', 0),
+                        accurate_passes=stats.get('accuratePass', 0),
+                        key_passes=stats.get('keyPass', 0),
+                        tackles=stats.get('totalTackle', 0),
+                        interceptions=stats.get('interceptionWon', 0),
+                        fouls_committed=stats.get('fouls', 0),
+                        fouls_drawn=stats.get('wasFouled', 0),
+                        saves=stats.get('saves', 0)
+                    ))
+        return parsed_lineups, parsed_player_stats
+
+    def _transform_squad_availability(self, lineups_data: Optional[Dict], team_map: Dict[int, ParsedTeam]) -> List[ParsedSquadAvailability]:
+        """Chuyển đổi thông tin cầu thủ vắng mặt."""
+        parsed_availabilities = []
+        if not lineups_data: return []
+
+        for team_side in ['home', 'away']:
+            missing_list = self._get_nested_value(lineups_data, f"{team_side}.missingPlayers", [])
+            team_id = self._get_nested_value(lineups_data, f"{team_side}.players.0.teamId")
+            team = team_map.get(team_id) if team_id else None
+
+            for missing_entry in missing_list:
+                player = self._transform_player(missing_entry.get('player'))
+                status = get_player_availability_from_sofascore(missing_entry.get('type'))
+                if player and status and team:
+                    parsed_availabilities.append(ParsedSquadAvailability(
+                        player=player, team=team, status=status,
+                        notes=f"Reason code: {missing_entry.get('reason')}"
+                    ))
+        return parsed_availabilities
+
+    def _transform_team_stats(self, stats_data: Optional[Dict], home_team: ParsedTeam, away_team: ParsedTeam) -> List[ParsedMatchTeamStats]:
+        """Chuyển đổi thống kê toàn trận của hai đội."""
+        if not all([stats_data, home_team, away_team]): return []
+
+        all_periods_stats = next((p for p in stats_data.get('statistics', []) if p.get('period') == 'ALL'), None)
+        if not all_periods_stats: return []
+
+        home_values, away_values = {}, {}
+        for group in all_periods_stats.get('groups', []):
+            for item in group.get('statisticsItems', []):
+                key = item.get('key')
+                if key:
+                    home_values[key] = item.get('homeValue', item.get('home'))
+                    away_values[key] = item.get('awayValue', item.get('away'))
+        
+        home_team_stats = ParsedMatchTeamStats(
+            team=home_team,
+            possession_percentage=convert_possession_to_decimal(home_values.get('ballPossession')),
+            total_shots=int(home_values.get('totalShotsOnGoal', 0)),
+            shots_on_target=int(home_values.get('shotsOnGoal', 0)),
+            shots_off_target=int(home_values.get('shotsOffGoal', 0)),
+            blocked_shots=int(home_values.get('blockedScoringAttempt', 0)),
+            fouls_committed=int(home_values.get('fouls', 0)),
+            corners=int(home_values.get('cornerKicks', 0)),
+            offsides=int(home_values.get('offsides', 0)),
+            saves=int(home_values.get('goalkeeperSaves', 0))
+        )
+        away_team_stats = ParsedMatchTeamStats(
+            team=away_team,
+            possession_percentage=convert_possession_to_decimal(away_values.get('ballPossession')),
+            total_shots=int(away_values.get('totalShotsOnGoal', 0)),
+            shots_on_target=int(away_values.get('shotsOnGoal', 0)),
+            shots_off_target=int(away_values.get('shotsOffGoal', 0)),
+            blocked_shots=int(away_values.get('blockedScoringAttempt', 0)),
+            fouls_committed=int(away_values.get('fouls', 0)),
+            corners=int(away_values.get('cornerKicks', 0)),
+            offsides=int(away_values.get('offsides', 0)),
+            saves=int(away_values.get('goalkeeperSaves', 0))
+        )
+        return [home_team_stats, away_team_stats]
+
+    def transform_match_bundle(
+        self, details: Dict, incidents: Optional[Dict], lineups: Optional[Dict], statistics: Optional[Dict]
+    ) -> Optional[ParsedMatchBundle]:
+        """
+        Phương thức chính, nhận tất cả dữ liệu thô và trả về một ParsedMatchBundle hoàn chỉnh.
+        """
+        raw_match_data = details.get("event")
+        if not raw_match_data or 'id' not in raw_match_data:
+            logger.error("Dữ liệu 'details.event' không hợp lệ. Không thể transform.")
+            return None
+
+        _, season = self._transform_league_and_season(raw_match_data)
+        stadium = self._transform_stadium(raw_match_data.get('venue'))
+        referee = self._transform_referee(raw_match_data.get('referee'))
+        home_team = self._transform_team(raw_match_data.get('homeTeam'))
+        away_team = self._transform_team(raw_match_data.get('awayTeam'))
+
+        if not all([season, home_team, away_team]):
+            logger.error("Thiếu dữ liệu Season, HomeTeam hoặc AwayTeam. Không thể tạo trận đấu.")
+            return None
+        
+        team_map = {home_team.external_id: home_team, away_team.external_id: away_team}
+
+        # SỬA LỖI TỶ SỐ: Ưu tiên 'normaltime', nếu không có thì dùng 'current'
+        home_goals = self._get_nested_value(raw_match_data, 'homeScore.normaltime', self._get_nested_value(raw_match_data, 'homeScore.current'))
+        away_goals = self._get_nested_value(raw_match_data, 'awayScore.normaltime', self._get_nested_value(raw_match_data, 'awayScore.current'))
+
+        match = ParsedMatch(
+            external_id=raw_match_data['id'],
+            season=season,
+            match_datetime=convert_timestamp_to_utc_datetime(raw_match_data.get('startTimestamp')),
+            match_week=str(self._get_nested_value(raw_match_data, 'roundInfo.round')),
+            home_team=home_team,
+            away_team=away_team,
+            stadium=stadium,
+            referee=referee,
+            status=get_match_status_from_sofascore(self._get_nested_value(raw_match_data, 'status.type')),
+            outcome=get_match_outcome_from_sofascore(raw_match_data.get('winnerCode')),
+            home_goals=home_goals,
+            away_goals=away_goals,
+            half_time_home_goals=self._get_nested_value(raw_match_data, 'homeScore.period1'),
+            half_time_away_goals=self._get_nested_value(raw_match_data, 'awayScore.period1'),
+            attendance=raw_match_data.get('attendance')
+        )
+        
+        events = self._transform_events(
+            self._get_nested_value(incidents, 'incidents', []), team_map,
+            raw_match_data.get('time', {}), home_team.external_id, away_team.external_id
+        )
+        lineups_list, player_stats_list = self._transform_lineups_and_player_stats(lineups, team_map)
+        squad_availability_list = self._transform_squad_availability(lineups, team_map)
+        team_stats_list = self._transform_team_stats(statistics, home_team, away_team)
+
+        return ParsedMatchBundle(
+            match=match,
+            events=events,
+            lineups=lineups_list,
+            squad_availability=squad_availability_list,
+            player_stats=player_stats_list,
+            team_stats=team_stats_list
+        )

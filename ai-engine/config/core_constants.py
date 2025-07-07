@@ -1,6 +1,6 @@
 # ai-engine/config/core_constants.py
 
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Any
 from enum import Enum
 import logging
 
@@ -8,67 +8,100 @@ logger = logging.getLogger(__name__)
 
 
 class MatchStatus(str, Enum):
+    """Trạng thái của một trận đấu."""
     SCHEDULED = "SCHEDULED"
     IN_PROGRESS = "IN_PROGRESS"
     FINISHED = "FINISHED"
     POSTPONED = "POSTPONED"
     CANCELLED = "CANCELLED"
     ABANDONED = "ABANDONED"
-    UNKNOWN = "Unknown"
+
 class PlayerPosition(str, Enum):
+    """Vị trí chung của cầu thủ."""
     GK = "GK"
     DEF = "DEF"
     MID = "MID"
     FWD = "FWD"
-    UNKNOWN = "Unknown"
 
 class MatchOutcome(str, Enum):
-    HOME = "H"
-    DRAW = "D"
-    AWAY = "A"
-    UNKNOWN = "Unknown"
+    """Kết quả trận đấu (Thắng/Hòa/Bại)."""
+    H = "H"  # Home win
+    D = "D"  # Draw
+    A = "A"  # Away win
 
 class PlayerStatus(str, Enum):
+    """Trạng thái sẵn sàng của cầu thủ cho một trận đấu."""
     AVAILABLE = "Available"
-    AWAY_ON_INTL_DUTY = "Away on Intl Duty"
-    MISSING_FIXTURE = "Missing Fixture"
-    QUESTIONABLE = "Questionable"
     INJURED = "Injured"
     SUSPENDED = "Suspended"
-    UNKNOWN = "Unknown"
+    QUESTIONABLE = "Questionable"
+    AWAY_ON_INTL_DUTY = "Away on Intl Duty"
+    MISSING_FIXTURE = "Missing Fixture"
 
 class MatchEventType(str, Enum):
+    """Các loại sự kiện trong trận đấu."""
     GOAL = 'goal'
-    OWN_GOAL = 'own goal'
-    PENALTY_GOAL = 'penalty goal'
-    MISSED_PENALTY = 'missed penalty'
     YELLOW_CARD = 'yellow card'
     RED_CARD = 'red card'
     SUBSTITUTION = 'substitution'
+    FOUL = 'foul'
+    CORNER = 'corner'
+    OFFSIDE = 'offside'
+    PENALTY = 'penalty'
+    OWN_GOAL = 'own goal'
+    MISSED_PENALTY = 'missed penalty'
+    PENALTY_GOAL = 'penalty goal'
     VAR_DECISION = 'var decision'
     GOAL_CANCELLED = 'goal cancelled'
     PENALTY_CONFIRMED = 'penalty confirmed'
     INJURY = 'injury'
     CORNER_KICK = 'corner kick'
     FREE_KICK = 'free kick'
-    OFFSIDE = 'offside'
-    FOUL = 'foul'
-    CORNER = 'corner'
-    PENALTY = 'penalty'
-    UNKNOWN = 'Unknown'
 
 class MatchPeriod(str, Enum):
+    """Các hiệp đấu."""
     FIRST_HALF = '1H'
     SECOND_HALF = '2H'
     EXTRA_TIME_1 = 'ET1'
     EXTRA_TIME_2 = 'ET2'
     PENALTIES = 'PEN'
-    UNKNOWN = 'Unknown'
+
+# --- Các hằng số khác không liên quan trực tiếp đến schema ENUMs ---
+class SofascoreWinnerCodes:
+    """SofaScore winner code constants"""
+    HOME_WIN = 1
+    AWAY_WIN = 2
+    DRAW_TYPE_1 = 3
+    DRAW_TYPE_2 = 0
+
+# SofaScore specific constants
+class SofascoreConstants:
+    # Premier League tournament ID
+    EPL_TOURNAMENT_ID = 17
+    
+    # Common season IDs (update these as needed)
+    SEASON_IDS = {
+        "2017/18": 13380,
+        "2018/19": 17359,
+        "2019/20": 23776,
+        "2020/21": 29415,
+        "2021/22": 37036,
+        "2022/23": 41886,
+        "2023/24": 52186,
+        "2024/25": 61627 
+    }
+
+# Legacy support - keep for backward compatibility
+class BetType:
+    UNKNOWN = "Unknown"
+
+BET_TYPE_MAPPING = {}
 
 # --- Dictionaries Mapping từ API về hằng số chuẩn hóa ---
+# Ánh xạ các giá trị từ các API (ví dụ: SofaScore) về Enum chuẩn của hệ thống.
 
 # SofaScore status mapping 
-SOFASCORE_STATUS_MAPPING = {
+SOFASCORE_STATUS_MAPPING: Dict[str, MatchStatus] = {
     # Scheduled statuses
     "notstarted": MatchStatus.SCHEDULED,
     "scheduled": MatchStatus.SCHEDULED,
@@ -104,40 +137,33 @@ SOFASCORE_STATUS_MAPPING = {
 }
 
 # SofaScore position mapping - keys normalized to lowercase
-SOFASCORE_POSITION_MAPPING = {
+SOFASCORE_POSITION_MAPPING: Dict[str, PlayerPosition] = {
+    # SofaScore dùng chữ cái đầu tiên cho vị trí
     "g": PlayerPosition.GK,
     "d": PlayerPosition.DEF,
     "m": PlayerPosition.MID,
-    "f": PlayerPosition.FWD,
-    "goalkeeper": PlayerPosition.GK,
-    "defender": PlayerPosition.DEF,
-    "midfielder": PlayerPosition.MID,
-    "forward": PlayerPosition.FWD,
-    "attacker": PlayerPosition.FWD
-}
-
-# SofaScore outcome mapping - keys normalized to string
-SOFASCORE_OUTCOME_MAPPING = {
-    "1": MatchOutcome.HOME,
-    "2": MatchOutcome.AWAY,
-    "0": MatchOutcome.DRAW,
-    "3": MatchOutcome.DRAW,
-    "home": MatchOutcome.HOME,
-    "away": MatchOutcome.AWAY,
-    "draw": MatchOutcome.DRAW
+    "f": PlayerPosition.FWD
 }
 
 # SofaScore player availability mapping
-SOFASCORE_PLAYER_AVAILABILITY_MAPPING = {
+SOFASCORE_PLAYER_AVAILABILITY_MAPPING: Dict[str, PlayerStatus] = {
     "missing": PlayerStatus.MISSING_FIXTURE,
-    "questionable": PlayerStatus.QUESTIONABLE,
+    "doubtful": PlayerStatus.QUESTIONABLE,
     "injured": PlayerStatus.INJURED,
     "suspended": PlayerStatus.SUSPENDED,
+    "questionable": PlayerStatus.QUESTIONABLE,
     "doubt": PlayerStatus.QUESTIONABLE,
-    "doubtful": PlayerStatus.QUESTIONABLE
 }
 
-SOFASCORE_EVENT_MAPPING = {
+SOFASCORE_PERIOD_MAPPING: Dict[str, MatchPeriod] = {
+    "1": MatchPeriod.FIRST_HALF, 
+    "2": MatchPeriod.SECOND_HALF, 
+    "3": MatchPeriod.EXTRA_TIME_1,
+    "4": MatchPeriod.EXTRA_TIME_2, 
+    "5": MatchPeriod.PENALTIES
+}
+
+SOFASCORE_EVENT_MAPPING: Dict[str, MatchEventType] = {
     "goal": MatchEventType.GOAL,
     "ownGoal": MatchEventType.OWN_GOAL,
     "penalty": MatchEventType.PENALTY_GOAL,
@@ -156,14 +182,6 @@ SOFASCORE_EVENT_MAPPING = {
     "offside": MatchEventType.OFFSIDE,
     "foul": MatchEventType.FOUL,
     "corner": MatchEventType.CORNER,
-}
-
-SOFASCORE_PERIOD_MAPPING = {
-    "1": MatchPeriod.FIRST_HALF,
-    "2": MatchPeriod.SECOND_HALF,
-    "3": MatchPeriod.EXTRA_TIME_1,
-    "4": MatchPeriod.EXTRA_TIME_2,
-    "5": MatchPeriod.PENALTIES
 }
 
 # Legacy API-Football mapping (kept for reference/migration)
@@ -202,9 +220,9 @@ API_FOOTBALL_STATUS_MAPPING = {
 
 # Legacy API-Football outcome mapping - keys normalized to lowercase
 API_FOOTBALL_OUTCOME_MAPPING = {
-    "home": MatchOutcome.HOME,
-    "draw": MatchOutcome.DRAW,
-    "away": MatchOutcome.AWAY
+    "home": MatchOutcome.H,
+    "draw": MatchOutcome.D,
+    "away": MatchOutcome.A
 }
 
 # Legacy API-Football position mapping - keys normalized to lowercase
@@ -224,139 +242,61 @@ API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING = {
 # --- Các hàm Mapping thống nhất - Trả về giá trị chuẩn hóa hoặc None ---
 
 # Unified mapping functions for easy switching between APIs
-def get_match_status(api_status: Optional[str], api_type: str = "sofascore") -> Optional[MatchStatus]:
-    """
-    Nhận trạng thái từ API và trả về trạng thái chuẩn hóa hoặc None nếu không xác định.
-    """
-    if not isinstance(api_status, str) or not api_status.strip():
-        return None
+def get_match_status_from_sofascore(api_status: Optional[str]) -> Optional[MatchStatus]:
+    if not isinstance(api_status, str) or not api_status.strip(): return None
+    return SOFASCORE_STATUS_MAPPING.get(api_status.lower().replace(" ", "_"))
 
-    if api_type == "sofascore":
-        return SOFASCORE_STATUS_MAPPING.get(api_status.lower())
-    elif api_type == "api_football":
-        return API_FOOTBALL_STATUS_MAPPING.get(api_status.upper())
-    
-    return None
+def get_player_position_from_sofascore(api_position: Optional[str]) -> Optional[PlayerPosition]:
+    if not isinstance(api_position, str) or not api_position.strip(): return None
+    return SOFASCORE_POSITION_MAPPING.get(api_position.lower())
 
-def get_player_position(api_position: Optional[str], api_type: str = "sofascore") -> Optional[PlayerPosition]:
-    """
-    Nhận vị trí từ API và trả về vị trí chuẩn hóa hoặc None nếu không xác định.
-    """
-    if not isinstance(api_position, str) or not api_position.strip():
-        return None
-
-    normalized_pos = api_position.lower()
-    if api_type == "sofascore":
-        return SOFASCORE_POSITION_MAPPING.get(normalized_pos)
-    elif api_type == "api_football":
-        return API_FOOTBALL_POSITION_MAPPING.get(normalized_pos)
-    
-    return None
-
-def get_match_outcome(api_outcome: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[MatchOutcome]:
-    """
-    Nhận kết quả từ API và trả về kết quả chuẩn hóa hoặc None nếu không xác định.
-    """
-    if api_outcome is None:
-        return None
-        
-    normalized_outcome = str(api_outcome).lower()
-    
-    if api_type == "sofascore":
-        return SOFASCORE_OUTCOME_MAPPING.get(normalized_outcome)
-    elif api_type == "api_football":
-        return API_FOOTBALL_OUTCOME_MAPPING.get(normalized_outcome)
-
+def get_match_outcome_from_sofascore(winner_code: Optional[int]) -> Optional[MatchOutcome]:
+    if winner_code == SofascoreWinnerCodes.HOME_WIN: return MatchOutcome.H
+    if winner_code == SofascoreWinnerCodes.AWAY_WIN: return MatchOutcome.A
+    if winner_code in (SofascoreWinnerCodes.DRAW_TYPE_1, SofascoreWinnerCodes.DRAW_TYPE_2): return MatchOutcome.D
     return None
         
-def get_player_availability(api_status: Optional[str], api_type: str = "sofascore") -> Optional[PlayerStatus]:
-    """
-    Nhận trạng thái sẵn sàng của cầu thủ từ API và trả về trạng thái chuẩn hóa hoặc None.
-    """
-    if not isinstance(api_status, str) or not api_status.strip():
-        return None
+def get_player_availability_from_sofascore(api_status: Optional[str]) -> Optional[PlayerStatus]:
+    if not isinstance(api_status, str) or not api_status.strip(): return None
+    return SOFASCORE_PLAYER_AVAILABILITY_MAPPING.get(api_status.lower())
+
+def get_event_type_from_sofascore(api_event: Dict[str, Any]) -> Optional[MatchEventType]:
+    if not isinstance(api_event, dict): return None
+    incident_type = api_event.get('incidentType')
+    if not incident_type: return None
+
+    # Logic đặc biệt cho các trường hợp phức tạp
+    if incident_type == 'goal':
+        if api_event.get('from') == 'penalty':
+            return MatchEventType.PENALTY_GOAL
+        if api_event.get('isHome') is not None and 'player' in api_event:
+            # Giả định logic xác định Own Goal (cần kiểm tra API)
+            # Ví dụ: nếu team_id của sự kiện khác với team_id của cầu thủ
+            pass
+
+    result = SOFASCORE_EVENT_MAPPING.get(incident_type)
+    if not result:
+        logger.debug(f"Unknown SofaScore event type: '{incident_type}'")
+    return result
+    
+def get_period_from_sofascore(api_event: Dict[str, Any]) -> Optional[MatchPeriod]:
+    """Xác định hiệp đấu từ một object sự kiện."""
+    if not isinstance(api_event, dict): return None
+
+    # SofaScore sử dụng time, reversedPeriodTime, addedTime để xác định hiệp
+    # Đây là logic giả định, cần được kiểm tra với dữ liệu thực tế
+    time = api_event.get('time')
+    if time is None: return None
+
+    if time <= 45 + api_event.get('injuryTime1', 0): return MatchPeriod.FIRST_HALF
+    if time <= 90 + api_event.get('injuryTime2', 0): return MatchPeriod.SECOND_HALF
+    if time <= 105 + api_event.get('injuryTime3', 0): return MatchPeriod.EXTRA_TIME_1
+    if time <= 120 + api_event.get('injuryTime4', 0): return MatchPeriod.EXTRA_TIME_2
+    # Logic cho PENALTIES cần có thông tin riêng từ API
+    
+    # Một cách khác nếu API cung cấp period trực tiếp
+    period_key = api_event.get('period') # Giả sử có trường 'period'
+    if period_key:
+        return SOFASCORE_PERIOD_MAPPING.get(str(period_key))
         
-    normalized_status = api_status.lower()
-    
-    if api_type == "sofascore":
-        return SOFASCORE_PLAYER_AVAILABILITY_MAPPING.get(normalized_status)
-    elif api_type == "api_football":
-        return API_FOOTBALL_PLAYER_AVAILABILITY_MAPPING.get(normalized_status)
-    
     return None
-
-# Hàm dịch cho Event Type
-def get_event_type(api_event_type: Optional[str], api_type: str = "sofascore") -> Optional[MatchEventType]:
-    """Nhận loại sự kiện từ API và trả về Enum chuẩn hóa."""
-    if not isinstance(api_event_type, str) or not api_event_type.strip(): return None
-    if api_type == "sofascore":
-        result = SOFASCORE_EVENT_MAPPING.get(api_event_type)
-        if not result:
-            logger.debug(f"Unknown SofaScore event type: '{api_event_type}'")
-        return result
-    return None
-
-#  Hàm dịch cho Match Period
-def get_match_period(api_period: Optional[Union[int, str]], api_type: str = "sofascore") -> Optional[MatchPeriod]:
-    """Nhận hiệp đấu từ API và trả về Enum chuẩn hóa."""
-    if api_period is None: return None
-    normalized_period = str(api_period)
-    if api_type == "sofascore":
-        result = SOFASCORE_PERIOD_MAPPING.get(normalized_period)
-        if not result:
-            logger.debug(f"Unknown SofaScore period: '{api_period}'")
-        return result
-    return None
-
-# --- Các hằng số khác không liên quan trực tiếp đến schema ENUMs ---
-class SofascoreWinnerCodes:
-    """SofaScore winner code constants"""
-    HOME_WIN = 1
-    AWAY_WIN = 2
-    DRAW = 0
-
-# SofaScore specific constants
-class SofascoreConstants:
-    # Premier League tournament ID
-    EPL_TOURNAMENT_ID = 17
-    
-    # Common season IDs (update these as needed)
-    SEASON_IDS = {
-        "2017/18": 13380,
-        "2018/19": 17359,
-        "2019/20": 23776,
-        "2020/21": 29415,
-        "2021/22": 37036,
-        "2022/23": 41886,
-        "2023/24": 52186,
-        "2024/25": 61627 
-    }
-    
-    # Match periods for display purposes
-    MATCH_PERIODS = {
-        "1H": "First Half",
-        "2H": "Second Half", 
-        "ET": "Extra Time",
-        "PEN": "Penalties",
-        "HT": "Halftime"
-    }
-    
-    # Statistics categories
-    STATS_CATEGORIES = {
-        "possession": "Ball possession",
-        "shots": "Total shots",
-        "shots_on_target": "Shots on target",
-        "corners": "Corner kicks",
-        "fouls": "Fouls",
-        "yellow_cards": "Yellow cards",
-        "red_cards": "Red cards",
-        "offsides": "Offsides",
-        "passes": "Total passes",
-        "pass_accuracy": "Pass accuracy"
-    }
-
-# Legacy support - keep for backward compatibility
-class BetType:
-    UNKNOWN = "Unknown"
-
-BET_TYPE_MAPPING = {}
