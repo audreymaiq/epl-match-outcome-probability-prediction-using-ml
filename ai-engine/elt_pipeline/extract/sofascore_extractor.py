@@ -215,7 +215,7 @@
 #         logger.info("SofaScoreClient session closed.")
 
 
-# ai-engine\elt_pipeline\extract\sofascore_extractor.py (PHIÊN BẢN SỬA LỖI)
+# ai-engine\elt_pipeline\extract\sofascore_extractor.py 
 
 import time
 import logging
@@ -235,7 +235,6 @@ class SofaScoreExtractor:
         self.scraping_config = scraping_config
         self.base_url = str(self.config.base_url).rstrip('/')
         
-        # Sử dụng session từ curl_cffi như file gốc của bạn
         self.session = Session(
             impersonate=self.scraping_config.browser_impersonate,
             verify=not self.scraping_config.ignore_ssl_errors

@@ -624,7 +624,6 @@ SOFASCORE_MATCH_FIELD_MAPPING: Dict[str, str] = {
     "winnerCode": "outcome_code",
     "attendance": "attendance",
 
-    # Score Details (SỬA LỖI QUAN TRỌNG: Thêm 'current' để lấy tỷ số cuối cùng)
     "homeScore.current": "home_goals",
     "awayScore.current": "away_goals",
     "homeScore.period1": "half_time_home_goals",
@@ -654,7 +653,6 @@ SOFASCORE_MATCH_FIELD_MAPPING: Dict[str, str] = {
     "venue.venueCoordinates.latitude": "stadium_latitude",
     "venue.venueCoordinates.longitude": "stadium_longitude",
 
-    # Referee (LƯU Ý: API SofaScore không cung cấp ngày sinh của trọng tài)
     "referee.id": "referee_external_id",
     "referee.name": "referee_name",
     "referee.country.name": "referee_country",
@@ -688,15 +686,15 @@ SOFASCORE_PLAYER_STATS_MAPPING: Dict[str, str] = {
     "interceptionWon": "interceptions",
     "fouls": "fouls_committed",
     "wasFouled": "fouls_drawn",
-    "yellowCard": "yellow_cards", # Lưu ý: API có thể không cung cấp trực tiếp, cần suy từ events
-    "redCard": "red_cards",     # Lưu ý: API có thể không cung cấp trực tiếp, cần suy từ events
+    "yellowCard": "yellow_cards", 
+    "redCard": "red_cards",     
     "saves": "saves",
 }
 
 # 4. Mapping cho các chỉ số thống kê của đội (trong mục statistics.statistics)
 SOFASCORE_TEAM_STATS_MAPPING: Dict[str, str] = {
     "ballPossession": "possession_percentage",
-    "totalShotsOnGoal": "total_shots", # Lưu ý tên trường API: "totalShotsOnGoal" là "Total shots"
+    "totalShotsOnGoal": "total_shots",
     "shotsOnGoal": "shots_on_target",
     "shotsOffGoal": "shots_off_target",
     "blockedScoringAttempt": "blocked_shots",
@@ -704,14 +702,11 @@ SOFASCORE_TEAM_STATS_MAPPING: Dict[str, str] = {
     "cornerKicks": "corners",
     "offsides": "offsides",
     "goalkeeperSaves": "saves",
-    "yellowCards": "yellow_cards", # Lưu ý: API có thể không cung cấp trực tiếp, cần suy từ events
-    "redCards": "red_cards",     # Lưu ý: API có thể không cung cấp trực tiếp, cần suy từ events
+    "yellowCards": "yellow_cards", 
+    "redCards": "red_cards",    
 }
 
-# =============================================================================
 # CÁC HÀM CHUYỂN ĐỔI (CONVERSION FUNCTIONS)
-# Các hàm này được thiết kế tốt và giữ nguyên.
-# =============================================================================
 
 def convert_timestamp_to_utc_datetime(timestamp: Optional[Union[int, float]]) -> Optional[datetime]:
     """Chuyển đổi Unix timestamp (int/float) thành đối tượng datetime có nhận biết múi giờ UTC."""
@@ -736,11 +731,8 @@ def convert_possession_to_decimal(value: Optional[str]) -> Optional[Decimal]:
     except (ValueError, TypeError):
         return None
 
-# =============================================================================
 # ÁNH XẠ CHUYỂN ĐỔI ĐẶC BIỆT (SPECIAL CONVERSIONS MAPPING)
-#
 # Liên kết TÊN TRƯỜNG NỘI BỘ (đã được dịch từ mapping ở trên) với HÀM CHUYỂN ĐỔI tương ứng.
-# =============================================================================
 
 SOFASCORE_SPECIAL_CONVERSIONS: Dict[str, Callable] = {
     # Tên trường nội bộ         # Hàm sẽ được gọi để xử lý giá trị của trường đó

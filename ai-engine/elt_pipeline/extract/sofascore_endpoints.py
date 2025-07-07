@@ -550,20 +550,6 @@ from enum import Enum
 from functools import lru_cache
 from typing import Set
 
-# =================================================================================
-# GIỚI THIỆU VAI TRÒ CỦA FILE NÀY
-#
-# Vai trò duy nhất của file này là định nghĩa các đường dẫn (paths) của SofaScore API
-# như một Enum. Nó hoạt động như một "bản đồ" tĩnh của API.
-#
-# File này KHÔNG chứa logic:
-# - Xây dựng URL đầy đủ (ví dụ: https://api.sofascore.com/...).
-# - Lấy thông tin từ file cấu hình (config).
-# - Quản lý rate limit, timeout hay headers.
-#
-# Toàn bộ logic đó thuộc về lớp `SofaScoreExtractor`.
-# =================================================================================
-
 class SofaScoreEndpoints(Enum):
     """
     Định nghĩa các đường dẫn API của SofaScore.
