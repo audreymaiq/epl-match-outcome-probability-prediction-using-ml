@@ -12,10 +12,10 @@ from config.core_constants import MatchStatus, PlayerPosition, MatchOutcome, Pla
 @dataclass
 class ParsedStadium:
     """Ánh xạ tới bảng `Stadiums`. Dữ liệu chuẩn hóa cho một sân vận động."""
-    external_id: int
-    name: str
-    city: Optional[str] = None
-    capacity: Optional[int] = None
+    external_id: int                # ID của đội bóng từ API.
+    name: str                       # Tên phổ biến của đội bóng (ví dụ: Man United).
+    city: Optional[str] = None      # Tên viết tắt (ví dụ: MU).
+    capacity: Optional[int] = None  # Một đối tượng `ParsedStadium` hoàn chỉnh.
     timezone: Optional[str] = None  
     latitude: Optional[float] = None
     longitude: Optional[float] = None

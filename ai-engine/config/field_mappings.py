@@ -610,6 +610,7 @@ from decimal import Decimal
 from .core_constants import MatchStatus, PlayerPosition, MatchOutcome, PlayerStatus, MatchEventType, MatchPeriod
 from .settings import get_config
 
+# Khi xem log, chúng ta sẽ biết ngay thông báo này đến từ file `field_mappings.py`.
 logger = logging.getLogger(__name__)
 
 # SOFASCORE: ÁNH XẠ TÊN TRƯỜNG (FIELD NAME MAPPINGS)
@@ -624,8 +625,8 @@ SOFASCORE_MATCH_FIELD_MAPPING: Dict[str, str] = {
     "winnerCode": "outcome_code",
     "attendance": "attendance",
 
-    "homeScore.current": "home_goals",
-    "awayScore.current": "away_goals",
+    "homeScore.normaltime": "home_goals",
+    "awayScore.normaltime": "away_goals",
     "homeScore.period1": "half_time_home_goals",
     "awayScore.period1": "half_time_away_goals",
 
@@ -709,7 +710,12 @@ SOFASCORE_TEAM_STATS_MAPPING: Dict[str, str] = {
 # CÁC HÀM CHUYỂN ĐỔI (CONVERSION FUNCTIONS)
 
 def convert_timestamp_to_utc_datetime(timestamp: Optional[Union[int, float]]) -> Optional[datetime]:
-    """Chuyển đổi Unix timestamp (int/float) thành đối tượng datetime có nhận biết múi giờ UTC."""
+    """
+    Chuyển đổi Unix timestamp (số giây từ 1/1/1970) thành đối tượng datetime có nhận biết múi giờ UTC.
+    - Input: Một số nguyên hoặc số thực (ví dụ: 1672531200).
+    - Output: Một đối tượng datetime (ví dụ: datetime(2023, 1, 1, 0, 0, tzinfo=<UTC>)) hoặc None nếu lỗi.
+    - Tại sao UTC?: Chuẩn hóa tất cả thời gian về một múi giờ duy nhất (UTC) là cực kỳ quan trọng để tránh nhầm lẫn và sai sót khi làm việc với dữ liệu từ nhiều nguồn hoặc trên các server khác nhau.
+    """
     if timestamp is None: return None
     try:
         return datetime.fromtimestamp(timestamp, tz=pytz.UTC)
@@ -718,12 +724,21 @@ def convert_timestamp_to_utc_datetime(timestamp: Optional[Union[int, float]]) ->
         return None
 
 def convert_timestamp_to_date(timestamp: Optional[Union[int, float]]) -> Optional[date]:
-    """Chuyển đổi Unix timestamp (int/float) thành đối tượng date."""
+    """
+    Chuyển đổi Unix timestamp thành đối tượng date (chỉ lấy ngày, không lấy giờ).
+    - Logic: Tái sử dụng hàm trên để lấy đối tượng datetime, sau đó chỉ trả về phần ngày (.date()).
+    - Ứng dụng: Hữu ích cho việc lưu ngày sinh, không cần quan tâm đến giờ sinh.
+    """
     dt = convert_timestamp_to_utc_datetime(timestamp)
     return dt.date() if dt else None
 
 def convert_possession_to_decimal(value: Optional[str]) -> Optional[Decimal]:
-    """Chuyển đổi chuỗi phần trăm (ví dụ: '60%') thành số Decimal (ví dụ: 60.00)."""
+    """
+    Chuyển đổi chuỗi phần trăm (ví dụ: '60%') thành số Decimal (ví dụ: 60.00).
+    - Input: Một chuỗi như "55%".
+    - Output: Một đối tượng Decimal như Decimal('55').
+    - Tại sao Decimal?: Sử dụng Decimal thay vì float để tránh các lỗi làm tròn không mong muốn. Điều này quan trọng khi thực hiện các phép tính tài chính hoặc thống kê cần độ chính xác cao.
+    """
     if value is None: return None
     try:
         # Loại bỏ ký tự '%' và chuyển thành Decimal để giữ độ chính xác

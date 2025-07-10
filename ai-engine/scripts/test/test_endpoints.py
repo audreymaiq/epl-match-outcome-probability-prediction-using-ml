@@ -125,7 +125,7 @@ def main():
         res = test_endpoint(full_url, params=params)
         results.append(res)
 
-        status = "PASS" if res["success"] else "❌ FAIL"
+        status = "PASS" if res["success"] else "FAIL"
         print(f"  {status} - Status: {res['status_code']} - Time: {res.get('response_time', 'NA')}s\n")
         time.sleep(0.3)
 

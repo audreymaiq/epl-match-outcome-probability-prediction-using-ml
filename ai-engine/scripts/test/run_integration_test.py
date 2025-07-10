@@ -11,7 +11,6 @@ from decimal import Decimal
 
 # --- Thiết lập môi trường và import ---
 # Tự động thêm thư mục gốc của dự án vào sys.path để đảm bảo import thành công
-# (Giả định file này nằm trong thư mục con của dự án)
 project_root = Path(__file__).resolve().parent.parent.parent
 import sys
 sys.path.insert(0, str(project_root))
@@ -31,10 +30,9 @@ except ImportError as e:
 
 
 # --- Cấu hình ---
-# Để test nhanh và nhất quán, ta sẽ chỉ định một ID trận đấu cụ thể đã có dữ liệu
-# Sử dụng ID trận Fulham vs Man City từ ví dụ của bạn
+# Sử dụng ID trận Fulham vs Man City 
 TARGET_MATCH_ID = 12436559
-OUTPUT_DIR = project_root / "scripts" / "test_output" # Đảm bảo đường dẫn tương đối từ gốc
+OUTPUT_DIR = project_root / "scripts" / "test"  / "test_output" # Đảm bảo đường dẫn tương đối từ gốc
 
 
 # --- Các hàm Helper ---
@@ -141,25 +139,21 @@ def main():
     
     transformed_bundle: Optional[ParsedMatchBundle] = None
     try:
-        # Gọi phương thức transform mới, truyền toàn bộ bundle thô
-        transformed_bundle = transformer.transform_match_bundle(
-            details=raw_data_bundle.get("details", {}),
-            incidents=raw_data_bundle.get("incidents"),
-            lineups=raw_data_bundle.get("lineups"),
-            statistics=raw_data_bundle.get("statistics")
-        )
+        transformed_bundle = transformer.transform_match_bundle(raw_data_bundle)
         
         if transformed_bundle:
             logger.info("=> THÀNH CÔNG! Transformer đã xử lý và trả về một ParsedMatchBundle hoàn chỉnh.")
             
-            # Kiểm tra nhanh một vài điểm dữ liệu quan trọng
+            # Kiểm tra nhanh một vài điểm dữ liệu quan trọng đã được sửa
             logger.info(f"   -> Trận đấu: {transformed_bundle.match.home_team.name} vs {transformed_bundle.match.away_team.name}")
-            logger.info(f"   -> Tỷ số đã sửa: {transformed_bundle.match.home_goals} - {transformed_bundle.match.away_goals}")
+            logger.info(f"   -> Tỷ số cuối cùng (đã xác thực): {transformed_bundle.match.home_goals} - {transformed_bundle.match.away_goals}")
+            logger.info(f"   -> Tỷ số Hiệp 1 (đã sửa): {transformed_bundle.match.half_time_home_goals} - {transformed_bundle.match.half_time_away_goals}")
             logger.info(f"   -> Số cầu thủ trong đội hình: {len(transformed_bundle.lineups)}")
             logger.info(f"   -> Số thống kê cầu thủ: {len(transformed_bundle.player_stats)}")
-            logger.info(f"   -> Số thống kê đội: {len(transformed_bundle.team_stats)}")
+            logger.info(f"   -> Số thống kê đội (cả trận): {len(transformed_bundle.team_stats)}")
             logger.info(f"   -> Số sự kiện (đã lọc): {len(transformed_bundle.events)}")
             
+            # Lưu file kết quả đã sửa lỗi
             save_to_json(transformed_bundle, f"transformed_bundle_match_{TARGET_MATCH_ID}.json")
         else:
             logger.critical("!!! THẤT BẠI: Transformer trả về None. Vui lòng kiểm tra log lỗi ở trên.")

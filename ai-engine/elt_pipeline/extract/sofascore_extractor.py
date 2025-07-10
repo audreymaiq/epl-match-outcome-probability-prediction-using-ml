@@ -217,6 +217,27 @@
 
 # ai-engine\elt_pipeline\extract\sofascore_extractor.py 
 
+"""
+Mục đích tổng thể của file:
+Đây là lớp (Class) chịu trách nhiệm chính cho việc giao tiếp với API của SofaScore.
+Nó không chỉ đơn giản là gửi request HTTP, mà còn triển khai nhiều cơ chế quan trọng
+để việc trích xuất dữ liệu (Extract) trở nên mạnh mẽ, đáng tin cậy và "lịch sự" với server của SofaScore.
+
+Các tính năng và quyết định thiết kế chính:
+1.  Rate Limiting: Giới hạn tần suất gửi request để tránh bị chặn IP do gửi quá nhiều yêu cầu trong thời gian ngắn.
+2.  Retry with Exponential Backoff: Tự động thử lại các request thất bại, với thời gian chờ tăng dần sau mỗi lần thử,
+    giúp xử lý các lỗi mạng tạm thời.
+3.  Circuit Breaker (Bộ ngắt mạch): Một mẫu thiết kế nâng cao để ngăn ứng dụng liên tục gửi request đến một dịch vụ
+    đang gặp sự cố, giúp hệ thống tự phục hồi nhanh hơn.
+4.  Impersonation: Sử dụng `curl-cffi` để giả lập (impersonate) một trình duyệt thật, vượt qua các cơ chế chống bot
+    cơ bản của các trang web.
+5.  Centralized Logic: Toàn bộ logic giao tiếp với SofaScore API được đóng gói trong lớp này, giúp các phần khác của
+    ứng dụng (ví dụ: các pipeline) chỉ cần gọi các phương thức đơn giản như `fetch_match_detail()` mà không cần
+    quan tâm đến sự phức tạp bên trong.
+6.  Sử dụng cấu hình động: Lớp nhận các đối tượng cấu hình (`SofascoreSettings`, `ScrapingSettings`) khi khởi tạo,
+    giúp nó linh hoạt và dễ dàng thay đổi hành vi (như URL, số lần retry, timeout) mà không cần sửa code.
+"""
+
 import time
 import logging
 from typing import List, Dict, Any, Optional, Tuple
@@ -231,6 +252,10 @@ logger = logging.getLogger(__name__)
 
 class SofaScoreExtractor:
     def __init__(self, sofascore_config: SofascoreSettings, scraping_config: ScrapingSettings):
+        """
+        Phương thức khởi tạo (constructor) của lớp.
+        Nó được gọi khi một đối tượng mới của lớp `SofaScoreExtractor` được tạo ra.
+        """
         self.config = sofascore_config
         self.scraping_config = scraping_config
         self.base_url = str(self.config.base_url).rstrip('/')
@@ -244,6 +269,12 @@ class SofaScoreExtractor:
         logger.info(f"SofaScoreExtractor initialized. Base URL: {self.base_url}, Request Interval: {self._request_interval:.2f}s")
 
     def _build_url(self, endpoint: SofaScoreEndpoints, params: Optional[Dict] = None, **kwargs) -> str:
+        """
+        Xây dựng URL hoàn chỉnh để gọi API.
+        - `endpoint`: Một thành viên của Enum `SofaScoreEndpoints`.
+        - `params`: Dictionary cho các query parameters (phần sau dấu `?`).
+        - `**kwargs`: Các tham số động để điền vào placeholder trong URL (ví dụ: `match_id=123`).
+        """        
         required_params = endpoint.get_required_params()
         missing_params = required_params - set(kwargs.keys())
         if missing_params:
@@ -259,6 +290,7 @@ class SofaScoreExtractor:
         return full_url
 
     def _rate_limit(self):
+        """Thực thi cơ chế giới hạn tần suất request."""
         elapsed = time.monotonic() - self._last_request_time
         if elapsed < self._request_interval:
             sleep_time = self._request_interval - elapsed
@@ -267,6 +299,10 @@ class SofaScoreExtractor:
         self._last_request_time = time.monotonic()
 
     def _execute_with_retry(self, url: str, referer: Optional[str] = None, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict[str, Any]]:
+        """
+        Hàm cốt lõi để thực thi một request với cơ chế retry, rate limiting và circuit breaker.
+        - `breaker`: Một đối tượng `CircuitBreaker` tùy chọn.
+        """
         max_retries = self.scraping_config.max_retries
         backoff_factor = self.scraping_config.backoff_factor
         
@@ -307,13 +343,22 @@ class SofaScoreExtractor:
         return None
 
     def _build_referer(self, **kwargs) -> str:
-        """Xây dựng URL referer dựa trên các tham số."""
+        """
+        Xây dựng header `Referer` 
+        Header `Referer` cho server biết request đến từ trang nào. Đây là một kỹ thuật quan trọng
+        để làm cho request trông giống như một người dùng thật đang duyệt web.
+        """
         web_base_url = str(self.config.web_base_url)
         if 'match_id' in kwargs:
             return f"{web_base_url}/event/{kwargs['match_id']}"
         return f"{web_base_url}/football/england/premier-league/{self.config.premier_league_id}"
 
-    # --- CÁC PHƯƠNG THỨC PUBLIC ---
+    # --- CÁC PHƯƠG THỨC PUBLIC ---
+    # Đây là "giao diện" của lớp, các phần khác của ứng dụng sẽ gọi các phương thức này.
+    # Chúng đều có cấu trúc tương tự nhau:
+    # 1. Xây dựng URL.
+    # 2. Xây dựng Referer.
+    # 3. Gọi `_execute_with_retry` để thực hiện request.
 
     def fetch_match_detail(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
         url = self._build_url(SofaScoreEndpoints.MATCH_DETAIL, match_id=match_id)
@@ -336,6 +381,11 @@ class SofaScoreExtractor:
         return self._execute_with_retry(url, referer=referer, breaker=breaker)
 
     def fetch_paginated_data(self, endpoint: SofaScoreEndpoints, response_field: str, breaker: Optional[CircuitBreaker] = None, **kwargs) -> Tuple[List[Dict], bool]:
+        """
+        Một phương thức tổng quát để lấy dữ liệu từ các endpoint có phân trang (pagination).
+        - `response_field`: Tên của trường trong JSON response chứa danh sách các mục (ví dụ: 'events', 'players').
+        - `**kwargs`: Các tham số cần thiết cho endpoint (ví dụ: `tournament_id`, `season_id`).
+        """
         all_items = []
         page = 0
         while True:
@@ -353,5 +403,9 @@ class SofaScoreExtractor:
         return all_items, len(all_items) > 0
 
     def close(self):
+        """
+        Phương thức dọn dẹp, đóng session lại để giải phóng tài nguyên.
+        Nên được gọi khi đối tượng Extractor không còn được sử dụng nữa.
+        """
         self.session.close()
         logger.info("SofaScoreExtractor session closed.")

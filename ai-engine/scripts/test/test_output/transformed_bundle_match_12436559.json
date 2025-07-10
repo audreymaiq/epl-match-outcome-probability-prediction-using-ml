@@ -76,7 +76,7 @@
         "outcome": "A",
         "home_goals": 0,
         "away_goals": 2,
-        "half_time_home_goals": 1,
+        "half_time_home_goals": 0,
         "half_time_away_goals": 1,
         "attendance": 27671,
         "internal_id": null,
@@ -125,7 +125,7 @@
                 "height": 195,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -231,7 +231,7 @@
                 "height": 181,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -339,7 +339,7 @@
                 "height": 171,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -447,7 +447,7 @@
                 "height": 171,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -557,7 +557,7 @@
                 "height": 176,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -665,7 +665,7 @@
                 "height": 178,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -772,7 +772,7 @@
                 "height": 172,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -858,7 +858,7 @@
                 "internal_id": null
             },
             "related_player": null,
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "from": "penalty",
@@ -940,7 +940,7 @@
                 "height": 182,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -1048,7 +1048,7 @@
                 "height": 183,
                 "internal_id": null
             },
-            "period": "2H",
+            "period": "1H",
             "description": null,
             "raw_event_data": {
                 "playerIn": {
@@ -1464,17 +1464,17 @@
                 "internal_id": null,
                 "internal_stadium_id": null
             },
-            "possession_percentage": "48",
-            "total_shots": 6,
-            "shots_on_target": 0,
+            "possession_percentage": "47",
+            "total_shots": 13,
+            "shots_on_target": 3,
             "shots_off_target": 6,
             "blocked_shots": 4,
-            "fouls_committed": 4,
-            "corners": 0,
-            "offsides": 0,
+            "fouls_committed": 11,
+            "corners": 1,
+            "offsides": 2,
             "yellow_cards": 0,
             "red_cards": 0,
-            "saves": 2
+            "saves": 3
         },
         {
             "team": {
@@ -1494,17 +1494,17 @@
                 "internal_id": null,
                 "internal_stadium_id": null
             },
-            "possession_percentage": "80",
-            "total_shots": 12,
-            "shots_on_target": 4,
-            "shots_off_target": 2,
-            "blocked_shots": 0,
-            "fouls_committed": 4,
+            "possession_percentage": "53",
+            "total_shots": 20,
+            "shots_on_target": 5,
+            "shots_off_target": 7,
+            "blocked_shots": 8,
+            "fouls_committed": 5,
             "corners": 6,
             "offsides": 0,
             "yellow_cards": 0,
             "red_cards": 0,
-            "saves": 0
+            "saves": 3
         }
     ]
 }

@@ -13,23 +13,36 @@ import atexit
 import threading
 
 # Global setup flag
-_LOGGING_SETUP = False
-_log_queue = Queue(maxsize=1000)
-_log_worker_thread = None
-_log_listener = None
+_LOGGING_SETUP = False # Cờ để đảm bảo setup chỉ chạy một lần duy nhất
+_log_queue = Queue(maxsize=1000) # Hàng đợi chứa các log record để xử lý bất đồng bộ
+_log_worker_thread = None # Thread xử lý log từ queue
+_log_listener = None # Lưu lại thông tin các handler gốc để teardown
 
 
 class SafeLogFormatter(jsonlogger.JsonFormatter):
-    """JSON formatter với redaction thông tin nhạy cảm toàn diện"""
+    """
+    Formatter tùy chỉnh để tạo log dạng JSON, đồng thời tự động che (redact) các thông tin nhạy cảm.
+    Kế thừa từ `jsonlogger.JsonFormatter` để có sẵn chức năng định dạng JSON.
+    Mục đích: Đảm bảo log không vô tình làm lộ các thông tin như mật khẩu, API key.
+    """
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Định nghĩa danh sách các từ khóa nhạy cảm. Bất kỳ trường log nào (key hoặc value) chứa các từ khóa này sẽ bị che đi.        
         self.sensitive_keywords = [
             "password", "api_key", "secret", "token", 
             "access_token", "auth_key", "credential"
         ]
     
     def add_fields(self, log_record, record, message_dict):
+        """
+        Ghi đè phương thức này để thêm các trường tùy chỉnh vào mỗi bản ghi log JSON.
+        Phương thức này được `jsonlogger` tự động gọi cho mỗi log.
+        - log_record: là dictionary cuối cùng sẽ được chuyển thành JSON.
+        - record: là đối tượng LogRecord gốc của thư viện logging.
+        - message_dict: là dictionary được phân tích từ thông điệp log.
+        """
+
         super().add_fields(log_record, record, message_dict)
         
         # Thống nhất biến môi trường
@@ -44,7 +57,10 @@ class SafeLogFormatter(jsonlogger.JsonFormatter):
         self.redact_sensitive_data(log_record)
     
     def redact_sensitive_data(self, record):
-        """Quét và redact thông tin nhạy cảm trong mọi trường log"""
+        """
+        Quét và che thông tin nhạy cảm trong mọi trường của một bản ghi log.
+        Hàm này lặp qua tất cả các key-value trong dictionary của log.
+        """
         for key, value in list(record.items()):
             key_lower = key.lower()
             
@@ -61,7 +77,12 @@ class SafeLogFormatter(jsonlogger.JsonFormatter):
 
 
 class QueueLogHandler(logging.Handler):
-    """Handler đẩy log vào queue để xử lý bất đồng bộ"""
+    """
+    Thay vì ghi log ra file hay console, nó sẽ đẩy
+    bản ghi log vào một đối tượng Queue.
+    Mục đích: Tách rời việc tạo log (nhanh) và việc xử lý log (chậm, do I/O).
+    Điều này giúp ứng dụng chính không bị block (chờ) khi ghi log.
+    """
     
     def __init__(self, queue):
         super().__init__()
@@ -83,7 +104,11 @@ class QueueLogHandler(logging.Handler):
 
 
 def _log_worker_func(original_handlers): 
-    """Worker xử lý log từ queue bất đồng bộ"""
+    """
+    Hàm mục tiêu (target function) cho luồng worker.
+    Chạy trong một vòng lặp vô hạn, liên tục lấy log từ `_log_queue` và xử lý chúng.
+    - `original_handlers`: là danh sách các handler thực sự (ghi file, console) được truyền vào.
+    """
     while True:
         try:
             record = _log_queue.get(timeout=1.0)
@@ -103,6 +128,13 @@ def _log_worker_func(original_handlers):
 _setup_lock = threading.Lock()
 
 def setup_logging(log_dir: str = None, log_level: str = None):
+    """
+    Hàm chính để thiết lập toàn bộ hệ thống logging cho ứng dụng.
+    Hàm này chỉ nên được gọi một lần khi ứng dụng khởi động.
+    
+    - log_dir: Thư mục để lưu file log.
+    - log_level: Cấp độ log tối thiểu cho console (VD: "INFO", "DEBUG").
+    """
     global _LOGGING_SETUP, _log_worker_thread, _log_listener
     
     if _LOGGING_SETUP:
@@ -230,12 +262,15 @@ def setup_logging(log_dir: str = None, log_level: str = None):
                 )
         
         # Thiết lập hệ thống log bất đồng bộ
+        # Không dùng trong môi trường 'test' để đơn giản hóa việc kiểm thử.
         if env != "test":
             root_logger = logging.getLogger()
             
+            # 1. Lưu lại các handler gốc (console, file, error) đang có.
             original_handlers = root_logger.handlers[:]
 
-            # Tạo worker thread và truyền handlers gốc vào.
+            # 2. Tạo và khởi động luồng worker.
+            # Truyền `original_handlers` vào để worker biết phải dùng handler nào để xử lý log.
             _log_worker_thread = threading.Thread(
                 target=_log_worker_func,
                 args=(original_handlers,), # <<== TRUYỀN HANDLERS VÀO
@@ -244,12 +279,12 @@ def setup_logging(log_dir: str = None, log_level: str = None):
             )
             _log_worker_thread.start()
             
-            # Tạo QueueHandler và thay thế các handlers hiện tại.
+            # 3. Tạo QueueHandler để đẩy log vào `_log_queue`.
             queue_handler = QueueLogHandler(_log_queue)
             queue_handler.setLevel(logging.DEBUG)  # Bắt tất cả log
             root_logger.handlers = [queue_handler]
             
-            # Lưu lại handlers gốc để teardown.
+            # 5. Lưu lại thông tin để có thể dọn dẹp sau này (teardown).
             _log_listener = {
                 "original_handlers": original_handlers,
                 "queue_handler": queue_handler
@@ -266,7 +301,12 @@ def setup_logging(log_dir: str = None, log_level: str = None):
         _LOGGING_SETUP = True 
 
 def teardown_logging():
-    """Dọn dẹp tài nguyên logging khi kết thúc ứng dụng (ĐÃ SỬA LỖI)"""
+    """
+    Dọn dẹp tài nguyên logging khi ứng dụng kết thúc.
+    Hàm này được `atexit` gọi tự động.
+    Mục đích chính: Đảm bảo tất cả các log trong queue đều được xử lý và ghi ra file/console
+    trước khi chương trình thoát hoàn toàn, tránh mất log.
+    """
     global _log_queue, _log_worker_thread, _log_listener, _LOGGING_SETUP
     if not _LOGGING_SETUP:
         return
@@ -305,8 +345,10 @@ def teardown_logging():
         logging.shutdown()
 
     except Exception as e:
+        # Nếu có lỗi trong quá trình dọn dẹp, ghi ra stderr
         sys.stderr.write(f"Error during logging teardown: {str(e)}\n")
     finally:
+        # Dù thành công hay thất bại, reset lại các biến toàn cục.
         _log_worker_thread = None
         _log_listener = None
         _LOGGING_SETUP = False
