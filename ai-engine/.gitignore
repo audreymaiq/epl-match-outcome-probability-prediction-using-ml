@@ -15,7 +15,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
-*.pkl
 *.sqlite3
 
 # VSCode and Jupyter
