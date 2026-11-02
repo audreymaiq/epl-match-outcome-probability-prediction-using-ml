@@ -2,98 +2,44 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { cn } from '@/lib/utils'
-import { BarChart2, Home, Users, Trophy, Brain, Menu, X } from 'lucide-react'
 import { useState } from 'react'
+import { Menu, X } from 'lucide-react'
 
 const navLinks = [
-  { href: '/', label: 'Home', icon: Home },
-  { href: '/matches', label: 'Matches', icon: Trophy },
-  { href: '/teams', label: 'Teams', icon: Users },
-  { href: '/predictions', label: 'Predictions', icon: BarChart2 },
-  { href: '/model', label: 'Model', icon: Brain },
+  { href: '/matches', label: 'Fixtures' },
+  { href: '/teams', label: 'Clubs' },
+  { href: '/predictions', label: 'Predictions' },
+  { href: '/model', label: 'About the model' },
 ]
 
 export function NavBar() {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
 
+  function isActive(href: string) {
+    return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`)
+  }
+
   return (
-    <nav className="sticky top-0 z-50 w-full shadow-md" style={{ backgroundColor: 'var(--pl-purple)' }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo / Brand */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm"
-              style={{ backgroundColor: 'var(--pl-green)', color: 'var(--pl-purple)' }}
-            >
-              PL
-            </div>
-            <span className="text-white font-bold text-lg hidden sm:block tracking-tight">
-              PL Predictions
-            </span>
-          </Link>
+    <header className="sticky top-0 z-40 border-b border-white/[0.1] bg-[#100d16]">
+      <div className="page-frame flex min-h-[4.25rem] items-center justify-between gap-5">
+        <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="Matchday home">
+          <span className="grid h-9 w-9 place-items-center bg-[var(--pl-purple)] font-mono text-sm font-black tracking-tighter text-white">90</span>
+          <span className="leading-none">
+            <span className="block text-[0.88rem] font-black tracking-[0.08em] text-white">MATCHDAY</span>
+            <span className="mt-1.5 block text-[0.58rem] font-semibold uppercase tracking-[0.11em] text-[var(--subtle)]">Premier League</span>
+          </span>
+        </Link>
 
-          {/* Desktop nav links */}
-          <div className="hidden md:flex items-center gap-1">
-            {navLinks.map(({ href, label, icon: Icon }) => {
-              const active = pathname === href || (href !== '/' && pathname.startsWith(href))
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                    active
-                      ? 'text-white'
-                      : 'text-purple-200 hover:text-white hover:bg-white/10'
-                  )}
-                  style={active ? { backgroundColor: 'rgba(0, 255, 133, 0.2)', color: 'var(--pl-green)' } : {}}
-                >
-                  <Icon size={15} />
-                  {label}
-                </Link>
-              )
-            })}
-          </div>
+        <nav aria-label="Main navigation" className="hidden h-[4.25rem] items-stretch gap-6 md:flex">
+          <Link href="/" aria-current={isActive('/') ? 'page' : undefined} className={`flex items-center border-b-2 px-1 text-xs font-bold transition-colors ${isActive('/') ? 'border-[var(--pl-green)] text-white' : 'border-transparent text-[var(--muted)] hover:text-white'}`}>Overview</Link>
+          {navLinks.map(({ href, label }) => <Link key={href} href={href} aria-current={isActive(href) ? 'page' : undefined} className={`flex items-center border-b-2 px-1 text-xs font-bold transition-colors ${isActive(href) ? 'border-[var(--pl-green)] text-white' : 'border-transparent text-[var(--muted)] hover:text-white'}`}>{label}</Link>)}
+        </nav>
 
-          {/* Mobile hamburger */}
-          <button
-            className="md:hidden text-white p-2 rounded-lg hover:bg-white/10"
-            onClick={() => setMobileOpen((v) => !v)}
-            aria-label="Toggle menu"
-          >
-            {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
-        </div>
+        <button type="button" className="grid h-10 w-10 place-items-center border border-white/10 text-white hover:bg-white/[0.06] md:hidden" onClick={() => setMobileOpen((open) => !open)} aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileOpen} aria-controls="mobile-navigation">{mobileOpen ? <X size={18} /> : <Menu size={18} />}</button>
       </div>
 
-      {/* Mobile menu */}
-      {mobileOpen && (
-        <div className="md:hidden border-t border-white/10 px-4 pb-4 pt-2 space-y-1">
-          {navLinks.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || (href !== '/' && pathname.startsWith(href))
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  'flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                  active
-                    ? 'text-white'
-                    : 'text-purple-200 hover:text-white hover:bg-white/10'
-                )}
-                style={active ? { backgroundColor: 'rgba(0, 255, 133, 0.2)', color: 'var(--pl-green)' } : {}}
-              >
-                <Icon size={16} />
-                {label}
-              </Link>
-            )
-          })}
-        </div>
-      )}
-    </nav>
+      {mobileOpen && <nav id="mobile-navigation" aria-label="Mobile navigation" className="border-t border-white/[0.1] bg-[#100d16] px-4 py-2 md:hidden"><div className="page-frame grid grid-cols-2">{[{ href: '/', label: 'Overview' }, ...navLinks].map(({ href, label }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} aria-current={isActive(href) ? 'page' : undefined} className={`border-b border-white/[0.07] px-2 py-3 text-sm font-semibold ${isActive(href) ? 'text-[var(--pl-green)]' : 'text-[var(--muted)]'}`}>{label}</Link>)}</div></nav>}
+    </header>
   )
 }
