@@ -20,7 +20,7 @@ router = APIRouter(prefix="/predictions", tags=["Predictions"])
     description=(
         "Returns calibrated P(Home Win), P(Draw), P(Away Win) for a given fixture. "
         "Provide either `match_id` (for a DB-registered match) or "
-        "`home_team_id + away_team_id + match_datetime` for a custom fixture."
+        "`home_team_id + away_team_id + match_datetime + season_name + match_week` for a custom fixture."
     ),
 )
 def predict(
