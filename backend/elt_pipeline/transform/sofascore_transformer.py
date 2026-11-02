@@ -270,7 +270,7 @@ class SofaScoreTransformer:
         return parsed_events
 
     def _transform_lineups_and_player_stats(
-        self, lineups_data: Optional[Dict], team_map: Dict[int, ParsedTeam]
+        self, lineups_data: Optional[Dict], teams_by_side: Dict[str, ParsedTeam]
     ) -> Tuple[List[ParsedLineup], List[ParsedMatchPlayerStats], Dict[int, int]]:
         """
         Trích xuất thông tin đội hình ra sân và thống kê chi tiết từng cầu thủ trong trận đấu.
@@ -286,10 +286,7 @@ class SofaScoreTransformer:
             player_list = self._get_nested_value(lineups_data, f"{team_side}.players", [])
             if not player_list: continue
 
-            # Lấy team_id từ đội của cầu thủ đầu tiên trong danh sách
-            first_player_team_id = self._get_nested_value(player_list, "0.teamId")
-            if not first_player_team_id: continue
-            team = team_map.get(first_player_team_id)
+            team = teams_by_side[team_side]
 
             for player_entry in player_list:
                 player = self._transform_player(player_entry.get('player'))
@@ -326,7 +323,7 @@ class SofaScoreTransformer:
                     ))
         return parsed_lineups, parsed_player_stats, player_id_to_team_map
 
-    def _transform_squad_availability(self, lineups_data: Optional[Dict], team_map: Dict[int, ParsedTeam]) -> List[ParsedSquadAvailability]:
+    def _transform_squad_availability(self, lineups_data: Optional[Dict], teams_by_side: Dict[str, ParsedTeam]) -> List[ParsedSquadAvailability]:
         """
         Chuyển đổi thông tin cầu thủ vắng mặt (do chấn thương, treo giò,...).
         Trích xuất từ trường 'missingPlayers' của lineups.
@@ -338,12 +335,7 @@ class SofaScoreTransformer:
             missing_list = self._get_nested_value(lineups_data, f"{team_side}.missingPlayers", [])
             if not missing_list: continue
 
-            # ### FIXED ###: Logic lấy team_id đáng tin cậy hơn
-            # Cần một cách để xác định team_id của danh sách cầu thủ vắng mặt
-            # Tạm giả định nó giống với team_id của các cầu thủ trong đội hình
-            first_player_team_id = self._get_nested_value(lineups_data, f"{team_side}.players.0.teamId")
-            if not first_player_team_id: continue
-            team = team_map.get(first_player_team_id)
+            team = teams_by_side[team_side]
 
             for missing_entry in missing_list:
                 player = self._transform_player(missing_entry.get('player'))
@@ -432,6 +424,7 @@ class SofaScoreTransformer:
             return None
         
         team_map = {home_team.external_id: home_team, away_team.external_id: away_team}
+        teams_by_side = {"home": home_team, "away": away_team}
 
         # Ưu tiên 'normaltime', nếu không có thì dùng 'current'
         home_goals = self._get_nested_value(raw_match_data, 'homeScore.normaltime')
@@ -448,19 +441,33 @@ class SofaScoreTransformer:
             half_time_home_goals = self._get_nested_value(raw_match_data, 'homeScore.period1')
             half_time_away_goals = self._get_nested_value(raw_match_data, 'awayScore.period1')
         
-        ### FIXED ###: Ghi đè outcome bằng logic từ tỷ số cuối cùng
-        final_outcome = MatchBusinessLogic.determine_outcome_from_score(home_goals, away_goals)
+        status = get_match_status_from_sofascore(self._get_nested_value(raw_match_data, 'status.type'))
+        if status is None:
+            logger.error("Match %s has an unsupported status.", raw_match_data['id'])
+            return None
+        match_datetime = convert_timestamp_to_utc_datetime(raw_match_data.get('startTimestamp'))
+        if match_datetime is None:
+            logger.error("Match %s has no valid kickoff timestamp.", raw_match_data['id'])
+            return None
+        if status.value == 'FINISHED' and (home_goals is None or away_goals is None):
+            logger.error("Finished match %s has no final score.", raw_match_data['id'])
+            return None
+        final_outcome = (
+            MatchBusinessLogic.determine_outcome_from_score(home_goals, away_goals)
+            if status.value == 'FINISHED' else None
+        )
+        round_number = self._get_nested_value(raw_match_data, 'roundInfo.round')
 
         match = ParsedMatch(
             external_id=raw_match_data['id'],
             season=season,
-            match_datetime=convert_timestamp_to_utc_datetime(raw_match_data.get('startTimestamp')),
-            match_week=str(self._get_nested_value(raw_match_data, 'roundInfo.round')),
+            match_datetime=match_datetime,
+            match_week=str(round_number) if round_number is not None else None,
             home_team=home_team,
             away_team=away_team,
             stadium=stadium,
             referee=referee,
-            status=get_match_status_from_sofascore(self._get_nested_value(raw_match_data, 'status.type')),
+            status=status,
             outcome=final_outcome,
             home_goals=home_goals,
             away_goals=away_goals,
@@ -470,14 +477,14 @@ class SofaScoreTransformer:
         )
         
         ### FIXED ###: Sửa đổi luồng xử lý để tạo map player-team trước
-        lineups_list, player_stats_list, player_id_to_team_map = self._transform_lineups_and_player_stats(lineups, team_map)
+        lineups_list, player_stats_list, player_id_to_team_map = self._transform_lineups_and_player_stats(lineups, teams_by_side)
         
         events = self._transform_events(
             self._get_nested_value(incidents, 'incidents', []), team_map,
             player_id_to_team_map, home_team.external_id, away_team.external_id
         )
         
-        squad_availability_list = self._transform_squad_availability(lineups, team_map)
+        squad_availability_list = self._transform_squad_availability(lineups, teams_by_side)
         team_stats_list = self._transform_team_stats(statistics, home_team, away_team)
 
         return ParsedMatchBundle(
