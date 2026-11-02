@@ -1,0 +1,79 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Premier League Match Outcome Probability Prediction - Root .gitignore
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+.eggs/
+venv/
+.venv/
+env/
+
+# ── IDE / Editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.ipynb_checkpoints/
+
+# ── Environment / Secrets ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.sample
+
+# ── Node.js / Frontend ───────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ── ML Artifacts ──────────────────────────────────────────────────────────────
+*.pkl
+*.joblib
+*.h5
+*.onnx
+mlruns/
+
+# ── Runtime / Cache ───────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+backend/cache/
+backend/logs/
+backend/data/raw/*.csv
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── Test / Coverage ───────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.log
+*.bak
+*.tmp
+materials/
+report/
+
