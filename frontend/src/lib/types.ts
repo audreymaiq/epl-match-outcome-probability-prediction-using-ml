@@ -57,13 +57,19 @@ export interface KeyFeatures {
   away_absences?: number
 }
 
-export interface PredictRequest {
-  match_id?: number
-  home_team_id?: number
-  away_team_id?: number
-  match_datetime?: string
-  include_feature_breakdown?: boolean
-}
+export type PredictRequest =
+  | {
+      match_id: number
+      include_feature_breakdown?: boolean
+    }
+  | {
+      home_team_id: number
+      away_team_id: number
+      match_datetime: string
+      season_name: string
+      match_week: number
+      include_feature_breakdown?: boolean
+    }
 
 export interface PredictResponse {
   match_id?: number
@@ -114,6 +120,7 @@ export interface MatchDetail extends MatchListItem {
 export interface MatchesParams {
   season?: string
   status?: string
+  team_id?: number
   page?: number
   page_size?: number
 }
@@ -198,21 +205,24 @@ export interface H2HResponse {
 // ─── Model types ───────────────────────────────────────────────────────────────
 
 export interface ModelInfo {
-  version: string
-  trained_at: string
-  algorithm: string
-  training_samples: number
-  features: string[]
-  accuracy: number
-  log_loss: number
-  calibration_slope?: number
+  status: 'loaded' | 'not_loaded'
+  version: string | null
+  trained_at?: string | null
+  training_seasons?: string[]
+  n_features?: number
+  feature_names?: string[]
+  algorithm?: string
+  cv_evaluation_model?: string | null
+  walk_forward_folds?: number | null
+  cv_metrics?: Record<string, number | null>
 }
 
 export interface ModelPerformance {
-  week: string
-  accuracy: number
-  predictions_made: number
-  correct_predictions: number
+  total_predictions: number
+  evaluated: number
+  correct?: number
+  accuracy: number | null
+  note?: string
 }
 
 // ─── Predictions list ──────────────────────────────────────────────────────────
