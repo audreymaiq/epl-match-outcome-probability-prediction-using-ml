@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --pl-purple: #3d195b;
+  --pl-purple-light: #5a2d82;
+  --pl-purple-dark: #2a1140;
+  --pl-green: #00ff85;
+  --pl-green-dark: #00cc6a;
+  --pl-white: #ffffff;
+  --pl-off-white: #f8f6fb;
+  --pl-gray-light: #e8e0f0;
+
+  --foreground: #1a1a2e;
+  --background: #f8f6fb;
+  --card-bg: #ffffff;
+  --card-border: #e8e0f0;
+  --muted: #6b7280;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground: #f0eaf8;
+    --background: #12061e;
+    --card-bg: #1e0d33;
+    --card-border: #3d195b;
+    --muted: #9ca3af;
+  }
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    @apply font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  .pl-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--card-border);
+    @apply rounded-xl shadow-sm transition-shadow hover:shadow-md;
+  }
+
+  .pl-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .pl-btn-primary {
+    background-color: var(--pl-purple);
+    @apply text-white px-4 py-2 rounded-lg font-medium transition-colors hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2;
+    --tw-ring-color: var(--pl-purple);
+  }
+
+  .pl-btn-secondary {
+    @apply bg-transparent border border-pl-purple text-pl-purple px-4 py-2 rounded-lg font-medium transition-colors hover:bg-pl-purple hover:text-white focus:outline-none;
+  }
+
+  .pl-input {
+    @apply w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pl-purple bg-white dark:bg-gray-800;
+  }
+
+  .pl-select {
+    @apply w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pl-purple bg-white dark:bg-gray-800 cursor-pointer;
+  }
+}
+
+/* Skeleton animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #e0d8ea 25%, #f0eaf8 50%, #e0d8ea 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  @apply rounded;
+}
+
+/* Probability bar animations */
+.prob-bar {
+  @apply h-full rounded-full transition-all duration-700 ease-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--pl-purple-light, #5a2d82);
+  border-radius: 3px;
+}
