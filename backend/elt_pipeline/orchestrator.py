@@ -23,11 +23,7 @@ from typing import List, Optional, TypedDict
 
 from providers.base.abstract_provider import AbstractDataProvider, AbstractDataTransformer
 from providers.base.provider_registry import ProviderRegistry, discover_providers
-from elt_pipeline.load.match_loader import MatchLoader
 from elt_pipeline.transform.data_structures import ParsedMatchBundle
-from utils.db_connector import DatabaseConnector
-from utils.logging_config import setup_logging
-from config.settings import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +116,7 @@ class ETLOrchestrator:
 
         # ── 3. Extract + Transform each match ─────────────────────────────────
         parsed_bundles: List[ParsedMatchBundle] = []
+        load_result = {"success": 0, "failed": 0, "total": 0}
 
         for i, summary in enumerate(summaries):
             if self._shutdown.is_set():
@@ -148,14 +145,17 @@ class ETLOrchestrator:
 
             # Flush to DB in batches to manage memory
             if len(parsed_bundles) >= self._batch_size:
-                self._load_batch(parsed_bundles)
+                batch_result = self._load_batch(parsed_bundles)
+                for key in load_result:
+                    load_result[key] += batch_result.get(key, 0)
                 parsed_bundles.clear()
                 gc.collect()
 
         # ── 4. Load remaining ──────────────────────────────────────────────────
-        load_result = {"success": 0, "failed": 0, "total": 0}
         if parsed_bundles:
-            load_result = self._load_batch(parsed_bundles)
+            batch_result = self._load_batch(parsed_bundles)
+            for key in load_result:
+                load_result[key] += batch_result.get(key, 0)
             parsed_bundles.clear()
 
         gc.collect()
@@ -163,13 +163,16 @@ class ETLOrchestrator:
             season_name,
             len(summaries),
             load_result.get("success", 0),
-            load_result.get("failed", 0),
+            len(summaries) - load_result.get("success", 0),
             t_start,
         )
 
     def _load_batch(self, bundles: List[ParsedMatchBundle]) -> dict:
         """Load a batch of bundles into DB via MatchLoader (full bundle - all tables)."""
         try:
+            from elt_pipeline.load.match_loader import MatchLoader
+            from utils.db_connector import DatabaseConnector
+
             with DatabaseConnector.session_scope() as session:
                 loader = MatchLoader(session)
                 result = loader.bulk_load(bundles)
@@ -198,6 +201,9 @@ def run_pipeline(
     provider_name: str,
     specific_seasons: Optional[List[str]] = None,
 ) -> PipelineResult:
+    from config.settings import get_config
+    from utils.db_connector import DatabaseConnector
+
     t_start = datetime.now()
     result = PipelineResult(
         success=False, provider=provider_name,
@@ -269,6 +275,8 @@ def run_pipeline(
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 def main() -> int:
+    from utils.logging_config import setup_logging
+
     parser = argparse.ArgumentParser(
         description="Provider-agnostic ELT Pipeline for football data.",
         epilog="Example: python -m elt_pipeline.orchestrator --provider sofascore",
