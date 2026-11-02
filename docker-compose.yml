@@ -1,5 +1,3 @@
-version: '3.9'
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Premier League Match Outcome Probability Prediction - Root Compose
 # Orchestrates: postgres, redis, mlflow, api, pipeline, frontend, monitoring
@@ -50,6 +48,7 @@ services:
       - ./backend/docker/postgres/migrations/002_add_elo_ratings.sql:/docker-entrypoint-initdb.d/03-migration-002.sql:ro
       - ./backend/docker/postgres/migrations/003_add_match_id_to_squad_availability.sql:/docker-entrypoint-initdb.d/04-migration-003.sql:ro
       - ./backend/docker/postgres/migrations/005_reconcile_feature_tables.sql:/docker-entrypoint-initdb.d/05-migration-005.sql:ro
+      - ./backend/docker/postgres/migrations/006_reconcile_match_loader.sql:/docker-entrypoint-initdb.d/06-migration-006.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-epl_user} -d ${DB_NAME:-epl_db}"]
       interval: 10s
@@ -167,12 +166,12 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
     container_name: epl-frontend
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:8000}
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
