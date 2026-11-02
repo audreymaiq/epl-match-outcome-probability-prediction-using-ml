@@ -5,44 +5,29 @@ import { NavBar } from '@/components/nav-bar'
 
 export const metadata: Metadata = {
   title: {
-    default: 'PL Predictions',
-    template: '%s | PL Predictions',
+    default: 'Matchday | Premier League',
+    template: '%s | Matchday',
   },
-  description: 'Premier League match outcome probability predictions powered by machine learning.',
-  keywords: ['Premier League', 'football', 'predictions', 'machine learning', 'match outcomes'],
+  description: 'Premier League fixtures, results, club form and match outcome probabilities.',
+  keywords: ['Premier League', 'football', 'fixtures', 'team form', 'match probabilities'],
 }
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode
-}) {
+}>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="min-h-screen flex flex-col">
+    <html lang="en">
+      <body className="flex min-h-screen flex-col">
         <Providers>
           <NavBar />
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {children}
-          </main>
-          <footer
-            className="mt-auto border-t py-6 text-center text-sm text-gray-500"
-            style={{ borderColor: 'var(--card-border)' }}
-          >
-            <p>
-              PL Predictions &mdash; Built with Next.js 14 &amp; Machine Learning
-            </p>
-            <p className="mt-1 text-xs opacity-60">
-              For entertainment purposes only. Not affiliated with the Premier League.
-            </p>
+          <div className="flex-1">{children}</div>
+          <footer className="mt-auto border-t border-[var(--border)] bg-[#100d16]/70">
+            <div className="page-frame flex flex-col gap-2 py-6 text-xs text-[var(--subtle)] sm:flex-row sm:items-center sm:justify-between">
+              <p className="font-semibold tracking-wide text-[var(--muted)]">MATCHDAY <span className="font-normal text-[var(--subtle)]">/ Premier League</span></p>
+              <p>Independent match data and probability estimates.</p>
+            </div>
           </footer>
         </Providers>
       </body>
