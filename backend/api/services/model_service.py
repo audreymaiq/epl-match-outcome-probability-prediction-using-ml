@@ -28,6 +28,7 @@ class ModelService:
             "n_features": len(prediction_svc._feature_names),
             "feature_names": prediction_svc._feature_names,
             "algorithm": meta.get("algorithm", "ensemble"),
+            "cv_evaluation_model": meta.get("cv_evaluation_model"),
             "walk_forward_folds": meta.get("walk_forward_folds"),
             "cv_metrics": meta.get("cv_metrics", {}),
         }
@@ -54,7 +55,7 @@ class ModelService:
                 "total_predictions": int(row.total),
                 "evaluated": int(row.evaluated),
                 "correct": int(row.correct or 0),
-                "accuracy": round(float(accuracy), 4) if accuracy else None,
+                "accuracy": round(float(accuracy), 4) if accuracy is not None else None,
             }
         except Exception as exc:
             logger.warning("Performance query failed (table may not exist yet): %s", exc)
