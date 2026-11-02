@@ -132,7 +132,7 @@ class EloCalculator:
         actual_home, actual_away = self._actual_scores(home_goals, away_goals)
 
         # 3. K-factor (adaptive)
-        k = self._k_factor(match_week, is_top6_clash)
+        k = self.k_factor(match_week, is_top6_clash)
 
         # 4. Goal-difference multiplier
         gd = abs(home_goals - away_goals)
@@ -215,7 +215,7 @@ class EloCalculator:
         else:
             return 0.0, 1.0
 
-    def _k_factor(self, match_week: int, is_top6_clash: bool) -> float:
+    def k_factor(self, match_week: int, is_top6_clash: bool = False) -> float:
         """
         Adaptive K-factor:
           - Early season (weeks 1-5): higher uncertainty → higher K
