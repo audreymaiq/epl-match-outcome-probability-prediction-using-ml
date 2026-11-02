@@ -27,7 +27,8 @@ CREATE TABLE "Leagues" (
   "country" VARCHAR(100) NOT NULL,
   "external_id" INT UNIQUE,                -- SofaScore unique tournament ID
   "established_year" INT CHECK (established_year > 1800 AND established_year <= EXTRACT(YEAR FROM NOW())::INT),
-  "created_at" TIMESTAMP NOT NULL DEFAULT now()
+  "created_at" TIMESTAMP NOT NULL DEFAULT now(),
+  "updated_at" TIMESTAMP NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE "Leagues" IS 'Information about football leagues.';
 COMMENT ON COLUMN "Leagues"."created_at" IS 'Record creation timestamp';
@@ -39,6 +40,8 @@ CREATE TABLE "Stadiums" (
   "name" VARCHAR(255) UNIQUE NOT NULL,
   "city" VARCHAR(100),
   "capacity" INT CHECK (capacity >= 0),
+  "latitude" DOUBLE PRECISION,
+  "longitude" DOUBLE PRECISION,
   "timezone" VARCHAR(50),  -- Nên lưu chuẩn TZ database name (ví dụ 'Europe/London'), ETL chuyển match_datetime đúng
   "created_at" TIMESTAMP NOT NULL DEFAULT now(),
   "updated_at" TIMESTAMP NOT NULL DEFAULT now()
@@ -137,6 +140,7 @@ CREATE TABLE "Matches" (
   "away_goals" INT CHECK (away_goals >= 0),
   "half_time_home_goals" INT CHECK (half_time_home_goals >= 0),
   "half_time_away_goals" INT CHECK (half_time_away_goals >= 0),
+  "attendance" INT CHECK (attendance >= 0),
   "outcome" "MatchOutcome",  -- NULL nếu match chưa FINISHED
   "status" "MatchStatus" NOT NULL,
   "created_at" TIMESTAMP NOT NULL DEFAULT now(),
@@ -224,6 +228,7 @@ CREATE TABLE "MatchPlayerStats" (
   "substituted_in_minute" INT CHECK (substituted_in_minute >= 0),
   "substituted_out_minute" INT CHECK (substituted_out_minute >= 0),
   "created_at" TIMESTAMP NOT NULL DEFAULT now(),
+  "updated_at" TIMESTAMP NOT NULL DEFAULT now(),
   CONSTRAINT uq_match_player UNIQUE ("match_id", "player_id"),
   CONSTRAINT chk_accurate_le_passes CHECK (accurate_passes <= passes)
 );
@@ -258,6 +263,7 @@ CREATE TABLE "MatchTeamStats" (
   "id" SERIAL PRIMARY KEY,
   "match_id" INT NOT NULL,
   "team_id" INT NOT NULL,
+  "location" "LocationType",
   "possession_percentage" NUMERIC(5,2) CHECK (possession_percentage >= 0 AND possession_percentage <= 100),
   "total_shots" INT NOT NULL DEFAULT 0 CHECK (total_shots >= 0),
   "shots_on_target" INT NOT NULL DEFAULT 0 CHECK (shots_on_target >= 0),
@@ -270,6 +276,7 @@ CREATE TABLE "MatchTeamStats" (
   "red_cards" INT NOT NULL DEFAULT 0 CHECK (red_cards >= 0),
   "saves" INT NOT NULL DEFAULT 0 CHECK (saves >= 0),
   "created_at" TIMESTAMP NOT NULL DEFAULT now(),
+  "updated_at" TIMESTAMP NOT NULL DEFAULT now(),
   CONSTRAINT uq_match_team UNIQUE ("match_id", "team_id")
 );
 COMMENT ON TABLE "MatchTeamStats" IS 'Team-specific statistics for a single match (home or away team).';
@@ -324,7 +331,7 @@ CREATE TABLE "Lineups" (
   "position_in_lineup" VARCHAR(50),  -- đủ dài cho mô tả chi tiết
   "shirt_number" INT CHECK (shirt_number >= 0),
   "is_captain" BOOLEAN NOT NULL DEFAULT FALSE,
-  "reported_at" TIMESTAMP NOT NULL,
+  "reported_at" TIMESTAMP,
   "created_at" TIMESTAMP NOT NULL DEFAULT now(),
   "updated_at" TIMESTAMP NOT NULL DEFAULT now(),
   CONSTRAINT uq_lineup UNIQUE ("match_id", "team_id", "player_id")
@@ -533,8 +540,8 @@ CREATE TABLE "ExternalMapping" (
     -- ID nội bộ trong hệ thống (FK tới bảng thực thể nội bộ)
     internal_id INTEGER NOT NULL, -- References the primary key of the internal entity table specified by entity_type (e.g., Teams, Players, Matches, etc.)
     -- Loại thực thể được ánh xạ (team/player/match/stadium/...)
-    entity_type VARCHAR(30) NOT NULL CHECK (
-        entity_type IN ('team', 'player', 'match', 'stadium', 'league', 'referee')
+    entity_type VARCHAR(30) NOT NULL CONSTRAINT chk_external_mapping_entity_type CHECK (
+        entity_type IN ('team', 'player', 'match', 'stadium', 'league', 'season', 'referee')
     ),
     -- Nguồn dữ liệu: API-Football, Sofascore, Transfermarkt, manual,...
     source_system VARCHAR(50) NOT NULL,
