@@ -45,6 +45,8 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from ml.elo.elo_calculator import DEFAULT_CONFIG, EloCalculator
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,26 +111,64 @@ class FeatureExtractor:
         self,
         home_team_id: int,
         away_team_id: int,
-        match_datetime: Optional[str] = None,
+        match_datetime: str,
+        season_name: str,
+        match_week: int,
     ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Extract features for a future fixture not yet in DB.
         Used by PredictionService for real-time inference.
         """
-        dt = datetime.fromisoformat(match_datetime) if match_datetime else datetime.now(timezone.utc)
+        if not season_name:
+            raise ValueError("season_name is required for a custom fixture.")
+        if not 1 <= match_week <= 38:
+            raise ValueError("match_week must be between 1 and 38.")
+        dt = datetime.fromisoformat(match_datetime)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        season = self._db.execute(text("""
+            SELECT s.id, s.name
+            FROM "Seasons" s
+            WHERE s.name = :season_name
+            LIMIT 1
+        """), {"season_name": season_name}).fetchone()
+        if season is None:
+            raise ValueError(f"Unknown season: {season_name}")
+        home_team_name = self._get_team_name(home_team_id)
+        away_team_name = self._get_team_name(away_team_id)
+        if not home_team_name or not away_team_name:
+            raise ValueError("Both team IDs must exist in the database.")
+        season_teams = self._db.execute(text("""
+            SELECT COUNT(DISTINCT team_id) AS team_count
+            FROM (
+                SELECT home_team_id AS team_id
+                FROM "Matches"
+                WHERE season_id = :season_id
+                  AND home_team_id IN (:home_id, :away_id)
+                UNION
+                SELECT away_team_id AS team_id
+                FROM "Matches"
+                WHERE season_id = :season_id
+                  AND away_team_id IN (:home_id, :away_id)
+            ) AS participating_teams
+        """), {
+            "season_id": season.id,
+            "home_id": home_team_id,
+            "away_id": away_team_id,
+        }).fetchone()
+        if not season_teams or season_teams.team_count != 2:
+            raise ValueError("Both teams must have participated in the requested season.")
         meta = {
             "match_id": None,
             "home_team_id": home_team_id,
             "away_team_id": away_team_id,
             "match_datetime": dt,
-            "match_week": None,
-            "season_id": None,
-            "season_name": None,
+            "match_week": str(match_week),
+            "season_id": season.id,
+            "season_name": season.name,
             "referee_id": None,
-            "home_team_name": self._get_team_name(home_team_id),
-            "away_team_name": self._get_team_name(away_team_id),
+            "home_team_name": home_team_name,
+            "away_team_name": away_team_name,
             "outcome": None,
         }
         row = self._build_feature_row(meta)
@@ -137,7 +177,7 @@ class FeatureExtractor:
     def extract_all_finished_matches(
         self,
         season_name: Optional[str] = None,
-        min_match_week: int = 6,
+        min_match_week: int = 0,
     ) -> pd.DataFrame:
         """
         Build feature matrix for ALL finished matches.
@@ -145,8 +185,9 @@ class FeatureExtractor:
 
         Args:
             season_name:     Limit to one season (None = all).
-            min_match_week:  Skip early-season matches where rolling stats are
-                             unreliable (default 6 = enough history for form).
+            min_match_week:  Optional lower bound for matchweek filtering.
+                             Early-season matches are included by default; their
+                             features use only prior-season history and fallbacks.
 
         Returns:
             DataFrame with features + 'outcome' column (H/D/A).
@@ -193,7 +234,7 @@ class FeatureExtractor:
         }
 
         # ── TIER 1: ELO ──────────────────────────────────────────────────────
-        elo_feats = self._features_elo(home_id, away_id, dt)
+        elo_feats = self._features_elo(home_id, away_id, dt, meta.get("season_name"))
         row.update(elo_feats)
 
         # ── TIER 1: Rolling Form ─────────────────────────────────────────────
@@ -219,7 +260,7 @@ class FeatureExtractor:
         row.update(self._features_attack_defense(home_id, away_id, dt, season_id))
 
         # ── TIER 2: Squad availability ────────────────────────────────────────
-        row.update(self._features_squad(home_id, away_id, match_id, dt))
+        row.update(self._features_squad(home_id, away_id, dt))
 
         # ── TIER 2: Referee tendencies ────────────────────────────────────────
         row.update(self._features_referee(referee_id, dt))
@@ -250,20 +291,31 @@ class FeatureExtractor:
     # ── TIER 1: ELO features ─────────────────────────────────────────────────
 
     def _features_elo(
-        self, home_id: int, away_id: int, dt: datetime
+        self, home_id: int, away_id: int, dt: datetime, season_name: Optional[str]
     ) -> Dict[str, Any]:
         """
         Pre-match ELO ratings - fetched from EloRatings table.
         Falls back to 1500 for teams with no history.
         """
-        home_elo = self._get_latest_elo(home_id, dt) or EPL_DEFAULTS["elo"]
-        away_elo = self._get_latest_elo(away_id, dt) or EPL_DEFAULTS["elo"]
+        def rating_before_match(team_id: int) -> float:
+            latest = self._get_latest_elo(team_id, dt)
+            if latest is None:
+                return DEFAULT_CONFIG.initial_elo
+            rating, previous_season = latest
+            if season_name and previous_season != season_name:
+                return EloCalculator().season_regression(rating)
+            return rating
+
+        home_elo = rating_before_match(home_id)
+        away_elo = rating_before_match(away_id)
         elo_diff = home_elo - away_elo
 
         # Logistic win probability (ELO standard)
         elo_win_prob_home = 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
         # Apply EPL home advantage bias (+65 ELO points conceptually)
-        elo_win_prob_home_adj = 1.0 / (1.0 + 10.0 ** (-(elo_diff + 65) / 400.0))
+        elo_win_prob_home_adj = 1.0 / (
+            1.0 + 10.0 ** (-(elo_diff + DEFAULT_CONFIG.home_advantage) / 400.0)
+        )
 
         return {
             "home_elo_before":       round(home_elo, 2),
@@ -273,17 +325,18 @@ class FeatureExtractor:
             "elo_win_prob_home_adj": round(elo_win_prob_home_adj, 4),
         }
 
-    def _get_latest_elo(self, team_id: int, before_dt: datetime) -> Optional[float]:
+    def _get_latest_elo(self, team_id: int, before_dt: datetime) -> Optional[Tuple[float, str]]:
         """Get the most recent ELO rating for a team before the given datetime."""
         row = self._db.execute(text("""
-            SELECT elo_after
-            FROM "EloRatings"
-            WHERE team_id = :tid
-              AND match_date < :dt
-            ORDER BY match_date DESC, id DESC
+            SELECT e.elo_after, e.season
+            FROM "EloRatings" e
+            JOIN "Matches" m ON m.id = e.match_id
+            WHERE e.team_id = :tid
+              AND m.match_datetime < :dt
+            ORDER BY m.match_datetime DESC, m.id DESC
             LIMIT 1
-        """), {"tid": team_id, "dt": before_dt.date()}).fetchone()
-        return float(row.elo_after) if row else None
+        """), {"tid": team_id, "dt": before_dt}).fetchone()
+        return (float(row.elo_after), row.season) if row else None
 
     # ── TIER 1: Rolling form ─────────────────────────────────────────────────
 
@@ -708,42 +761,34 @@ class FeatureExtractor:
         self,
         home_id: int,
         away_id: int,
-        match_id: Optional[int],
         before_dt: datetime,
     ) -> Dict[str, Any]:
         """
-        Count unavailable players per team.
-        If match_id is known, use exact squad availability.
-        Otherwise use players absent in previous match (proxy).
+        Use the most recent prior match's absence report as a proxy.
+
+        Current-match lineup data may be revised after kickoff, so using it in
+        historical training would break the pre-match information boundary.
         """
         def _count_absences(team_id: int) -> Tuple[int, bool]:
             """Returns (total_absences, goalkeeper_absent)."""
-            if match_id:
-                sql = """
-                    SELECT COUNT(*) AS cnt,
-                           SUM(CASE WHEN p.position = 'GK' THEN 1 ELSE 0 END) AS gk_cnt
-                    FROM "SquadAvailability" sa
-                    JOIN "Players" p ON p.id = sa.player_id
-                    WHERE sa.match_id = :mid AND sa.team_id = :tid
-                """
-                row = self._db.execute(text(sql), {"mid": match_id, "tid": team_id}).fetchone()
-            else:
-                sql = """
-                    SELECT COUNT(*) AS cnt,
-                           SUM(CASE WHEN p.position = 'GK' THEN 1 ELSE 0 END) AS gk_cnt
-                    FROM "SquadAvailability" sa
-                    JOIN "Players" p ON p.id = sa.player_id
-                    JOIN "Matches" m ON m.id = sa.match_id
-                    WHERE sa.team_id = :tid
-                      AND m.match_datetime = (
-                          SELECT MAX(m2.match_datetime)
-                          FROM "Matches" m2
-                          JOIN "SquadAvailability" sa2 ON sa2.match_id = m2.id
-                          WHERE sa2.team_id = :tid
-                            AND m2.match_datetime < :dt
-                      )
-                """
-                row = self._db.execute(text(sql), {"tid": team_id, "dt": before_dt}).fetchone()
+            sql = """
+                SELECT COUNT(*) AS cnt,
+                       SUM(CASE WHEN p.position = 'GK' THEN 1 ELSE 0 END) AS gk_cnt
+                FROM "SquadAvailability" sa
+                JOIN "Players" p ON p.id = sa.player_id
+                JOIN "Matches" m ON m.id = sa.match_id
+                WHERE sa.team_id = :tid
+                  AND m.id = (
+                      SELECT m2.id
+                      FROM "Matches" m2
+                      JOIN "SquadAvailability" sa2 ON sa2.match_id = m2.id
+                      WHERE sa2.team_id = :tid
+                        AND m2.match_datetime < :dt
+                      ORDER BY m2.match_datetime DESC, m2.id DESC
+                      LIMIT 1
+                  )
+            """
+            row = self._db.execute(text(sql), {"tid": team_id, "dt": before_dt}).fetchone()
 
             cnt = int(row.cnt or 0) if row else 0
             gk_absent = bool(row and row.gk_cnt and row.gk_cnt > 0)
