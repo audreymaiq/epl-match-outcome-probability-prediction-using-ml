@@ -1,256 +1,92 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
-import { useMatches, useModelInfo, useTeams, usePredict } from '@/lib/hooks'
+import { useEffect, useState } from 'react'
+import { ArrowRight, CalendarDays, ChevronRight } from 'lucide-react'
+import { useMatches, useTeams, usePredict, useModelInfo } from '@/lib/hooks'
+import { MatchCard } from '@/components/match-card'
 import { ProbabilityBars } from '@/components/probability-bars'
-import type { MatchListItem, Team, PagedResponse } from '@/lib/types'
+import type { Team } from '@/lib/types'
 
-// ── Outcome badge ────────────────────────────────────────────────────────────
-function OutcomeBadge({ outcome }: { outcome?: string }) {
-  if (!outcome) return null
-  const cfg: Record<string, { label: string; cls: string }> = {
-    H: { label: 'Home Win', cls: 'bg-green-500/20 text-green-400 border border-green-500/30' },
-    D: { label: 'Draw', cls: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' },
-    A: { label: 'Away Win', cls: 'bg-blue-500/20 text-blue-400 border border-blue-500/30' },
-  }
-  const { label, cls } = cfg[outcome] ?? { label: outcome, cls: 'bg-white/10 text-white/40' }
-  return (
-    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${cls}`}>
-      {label}
-    </span>
-  )
+function localDate() {
+  const date = new Date()
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-// ── Match card ───────────────────────────────────────────────────────────────
-function MatchCard({ match }: { match: MatchListItem }) {
-  const isFinished = match.status === 'FINISHED'
-
-  return (
-    <Link href={`/matches/${match.id}`}>
-      <div className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer group">
-        {/* Status + Week */}
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[10px] text-white/40 font-medium uppercase tracking-widest">
-            GW{match.match_week}
-          </span>
-          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-            isFinished ? 'bg-white/10 text-white/40' :
-            match.status === 'LIVE' ? 'bg-red-500/20 text-red-400' :
-            'bg-[#00ff85]/20 text-[#00ff85]'
-          }`}>
-            {match.status}
-          </span>
-        </div>
-
-        {/* Teams + Score */}
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <span className="text-sm font-semibold text-white text-right flex-1 truncate">
-            {match.home_team.name}
-          </span>
-          <div className="text-center min-w-[52px]">
-            {isFinished ? (
-              <span className="text-lg font-bold text-white">
-                {match.home_goals ?? 0} – {match.away_goals ?? 0}
-              </span>
-            ) : (
-              <span className="text-xs text-white/30">vs</span>
-            )}
-          </div>
-          <span className="text-sm font-semibold text-white text-left flex-1 truncate">
-            {match.away_team.name}
-          </span>
-        </div>
-
-        {/* Actual outcome (finished) */}
-        {isFinished && (
-          <div className="flex justify-center mt-1">
-            <OutcomeBadge outcome={match.outcome} />
-          </div>
-        )}
-
-        {/* Date */}
-        <div className="text-[10px] text-white/30 text-center mt-3">
-          {new Date(match.match_datetime).toLocaleDateString('en-GB', {
-            weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-          })}
-        </div>
-      </div>
-    </Link>
-  )
-}
-
-// ── Stat card ────────────────────────────────────────────────────────────────
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-center">
-      <div className="text-2xl font-bold text-[#00ff85]">{value}</div>
-      <div className="text-xs text-white/60 mt-1 font-medium">{label}</div>
-      {sub && <div className="text-[10px] text-white/30 mt-0.5">{sub}</div>}
-    </div>
-  )
-}
-
-// ── Quick Predict form ───────────────────────────────────────────────────────
-function QuickPredict() {
-  const { data: teamsPage } = useTeams()
+function MatchEstimator() {
+  const { data: teamsPage, isLoading: teamsLoading } = useTeams()
+  const { data: modelInfo } = useModelInfo()
+  const seasons = modelInfo?.training_seasons ?? []
   const teams = teamsPage?.data ?? []
-  const { mutate: predict, data: result, isPending, reset } = usePredict()
+  const prediction = usePredict()
   const [homeId, setHomeId] = useState('')
   const [awayId, setAwayId] = useState('')
-  const [matchDate, setMatchDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  )
+  const [matchDate, setMatchDate] = useState(localDate)
+  const [seasonName, setSeasonName] = useState('')
+  const [matchWeek, setMatchWeek] = useState('1')
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!homeId || !awayId || homeId === awayId) return
-    predict({
+  useEffect(() => {
+    if (!seasonName && seasons.length) setSeasonName(seasons[seasons.length - 1])
+  }, [seasonName, seasons])
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!homeId || !awayId || homeId === awayId || !seasonName || !matchWeek) return
+    prediction.mutate({
       home_team_id: Number(homeId),
       away_team_id: Number(awayId),
       match_datetime: `${matchDate}T15:00:00Z`,
+      season_name: seasonName,
+      match_week: Number(matchWeek),
     })
   }
 
-  const confidenceLabel = (c: number) =>
-    c >= 0.6 ? 'high' : c >= 0.45 ? 'medium' : 'low'
-
-  const selectCls = "w-full bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#00ff85] transition-colors"
-
   return (
-    <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-      <h2 className="text-lg font-bold text-white mb-4">⚡ Quick Predict</h2>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <select className={selectCls} value={homeId} onChange={e => { setHomeId(e.target.value); reset() }}>
-          <option value="">Select Home Team</option>
-          {teams.map((t: Team) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </select>
-        <select className={selectCls} value={awayId} onChange={e => { setAwayId(e.target.value); reset() }}>
-          <option value="">Select Away Team</option>
-          {teams.filter((t: Team) => String(t.id) !== homeId).map((t: Team) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </select>
-        <input
-          type="date"
-          className={selectCls}
-          value={matchDate}
-          onChange={e => setMatchDate(e.target.value)}
-        />
-        <button
-          type="submit"
-          disabled={!homeId || !awayId || homeId === awayId || isPending}
-          className="w-full bg-[#00ff85] text-[#3d195b] font-bold py-2.5 rounded-lg text-sm hover:bg-[#00ff85]/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-        >
-          {isPending ? 'Predicting…' : 'Predict Outcome'}
-        </button>
+    <section className="surface p-5 sm:p-6" aria-labelledby="estimator-title">
+      <div className="mb-5 border-b border-[var(--border)] pb-4">
+        <p className="eyebrow">Match estimator</p>
+        <h2 id="estimator-title" className="mt-2 text-lg font-bold text-white">Estimate an outcome</h2>
+        <p className="mt-1 text-xs leading-5 text-[var(--muted)]">Choose two clubs to see the model&apos;s probabilities.</p>
+      </div>
+      <form onSubmit={submit} className="space-y-3">
+        <label className="block space-y-1.5"><span className="data-label">Home club</span><select className="field-control" value={homeId} onChange={(event) => { setHomeId(event.target.value); prediction.reset() }} required disabled={teamsLoading}><option value="">{teamsLoading ? 'Loading clubs…' : 'Select a club'}</option>{teams.map((team: Team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+        <label className="block space-y-1.5"><span className="data-label">Away club</span><select className="field-control" value={awayId} onChange={(event) => { setAwayId(event.target.value); prediction.reset() }} required disabled={teamsLoading}><option value="">Select a club</option>{teams.filter((team: Team) => String(team.id) !== homeId).map((team: Team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+        <label className="block space-y-1.5"><span className="data-label">Match date</span><input className="field-control" type="date" value={matchDate} onChange={(event) => { setMatchDate(event.target.value); prediction.reset() }} required /></label>
+        <label className="block space-y-1.5"><span className="data-label">Season</span><select className="field-control" value={seasonName} onChange={(event) => { setSeasonName(event.target.value); prediction.reset() }} required disabled={!seasons.length}><option value="">Select a season</option>{seasons.map((season) => <option key={season} value={season}>{season}</option>)}</select></label>
+        <label className="block space-y-1.5"><span className="data-label">Matchweek</span><input className="field-control" type="number" min="1" max="38" value={matchWeek} onChange={(event) => { setMatchWeek(event.target.value); prediction.reset() }} required /></label>
+        <button className="button-primary w-full" type="submit" disabled={!homeId || !awayId || !seasonName || !matchWeek || prediction.isPending}>{prediction.isPending ? 'Calculating…' : 'Show probabilities'}<ArrowRight size={15} /></button>
       </form>
-
-      {result && (
-        <div className="mt-4 pt-4 border-t border-white/10">
-          <ProbabilityBars
-            probabilities={result.probabilities}
-            predicted_outcome={result.predicted_outcome}
-            homeTeam={result.home_team_name}
-            awayTeam={result.away_team_name}
-          />
-          <p className="text-[10px] text-white/30 text-center mt-3">
-            Confidence: <span className="text-white/60 capitalize">{confidenceLabel(result.confidence)}</span>
-            {' '}({(result.confidence * 100).toFixed(0)}%)
-          </p>
-        </div>
-      )}
-    </div>
+      {prediction.isError && <p role="alert" className="mt-4 border-l-2 border-[var(--danger)] bg-[rgba(255,139,145,.07)] p-3 text-xs leading-5 text-[var(--danger)]">The estimate could not be generated. The prediction service may be unavailable.</p>}
+      {prediction.data && <div className="mt-5 border-t border-[var(--border)] pt-5"><div className="mb-4 flex items-baseline justify-between gap-3"><div><p className="data-label">Most likely result</p><p className="mt-1 text-sm font-bold text-white">{prediction.data.predicted_outcome === 'H' ? `${prediction.data.home_team_name} win` : prediction.data.predicted_outcome === 'A' ? `${prediction.data.away_team_name} win` : 'Draw'}</p></div><span className="font-mono text-sm font-bold tabular-nums text-[var(--pl-green)]">{(prediction.data.confidence * 100).toFixed(0)}%</span></div><ProbabilityBars probabilities={prediction.data.probabilities} predicted_outcome={prediction.data.predicted_outcome} homeTeam={prediction.data.home_team_name} awayTeam={prediction.data.away_team_name} compact /><p className="mt-4 text-[0.68rem] leading-5 text-[var(--subtle)]">Estimates are based on historical data and do not guarantee a result.</p></div>}
+    </section>
   )
 }
 
-// ── Home page ────────────────────────────────────────────────────────────────
 export default function HomePage() {
-  const { data: matchesPage, isLoading } = useMatches({ status: 'SCHEDULED', page_size: 6 })
-  const { data: model } = useModelInfo()
-
-  const matches = matchesPage?.data ?? []
+  const { data, isLoading, isError } = useMatches({ status: 'SCHEDULED', page_size: 6 })
+  const matches = data?.data ?? []
 
   return (
-    <main className="max-w-7xl mx-auto px-4 py-8 space-y-10">
-      {/* Hero */}
-      <section className="text-center py-10">
-        <div className="inline-flex items-center gap-2 bg-[#00ff85]/10 border border-[#00ff85]/30 rounded-full px-4 py-1.5 mb-5">
-          <span className="text-[#00ff85] text-xs font-bold uppercase tracking-widest">AI-Powered</span>
+    <main className="page-frame pb-16 pt-7 sm:pt-10">
+      <section className="mb-9 border-y border-white/[0.12] py-7 sm:py-9">
+        <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
+          <div>
+            <p className="eyebrow">England · Premier League</p>
+            <h1 className="mt-3 text-4xl font-extrabold leading-none tracking-[-0.045em] text-white sm:text-6xl">Match centre</h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">Fixtures, results and match outcome probabilities for the Premier League.</p>
+          </div>
+          <Link href="/matches" className="button-secondary self-start sm:self-auto">All fixtures <ArrowRight size={15} /></Link>
         </div>
-        <h1 className="text-4xl md:text-5xl font-extrabold text-white mb-3 leading-tight">
-          Premier League<br />
-          <span className="text-[#00ff85]">Match Predictions</span>
-        </h1>
-        <p className="text-white/50 max-w-lg mx-auto text-sm leading-relaxed">
-          Stacking ensemble (XGBoost + LightGBM + CatBoost) trained on ELO ratings,
-          rolling form, H2H, squad availability, and 60+ features.
-        </p>
       </section>
 
-      {/* Model stats */}
-      {model && (
-        <section>
-          <h2 className="text-sm font-bold text-white/50 uppercase tracking-widest mb-3">Model Performance</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard label="Accuracy" value={`${(model.accuracy * 100).toFixed(1)}%`} sub="Walk-forward CV" />
-            <StatCard label="Log-Loss" value={model.log_loss.toFixed(3)} sub="Lower = better" />
-            <StatCard label="Training Samples" value={model.training_samples.toLocaleString()} sub="EPL matches" />
-            <StatCard label="Model Version" value={model.version} sub={`v${model.algorithm}`} />
-          </div>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <section aria-labelledby="fixtures-title">
+          <div className="mb-4 flex items-end justify-between gap-4 border-b border-[var(--border)] pb-3"><div><p className="eyebrow">Schedule</p><h2 id="fixtures-title" className="mt-1.5 text-xl font-bold text-white">Upcoming fixtures</h2></div><Link href="/matches" className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--pl-green)] hover:text-white">Full list <ChevronRight size={14} /></Link></div>
+          {isLoading ? <div className="grid gap-3 sm:grid-cols-2">{Array.from({ length: 4 }, (_, index) => <div key={index} className="surface-quiet h-36 animate-pulse" />)}</div> : isError ? <div className="surface-quiet p-6 text-sm text-[var(--danger)]">Fixtures could not be loaded. Please try again shortly.</div> : matches.length ? <div className="grid gap-3 sm:grid-cols-2">{matches.map((match) => <MatchCard key={match.id} match={match} />)}</div> : <div className="surface-quiet p-8 text-center"><CalendarDays className="mx-auto text-[var(--subtle)]" size={20} /><p className="mt-3 text-sm font-semibold text-white">No upcoming fixtures</p><p className="mt-1 text-xs text-[var(--muted)]">View the full schedule for completed and postponed matches.</p><Link href="/matches" className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-[var(--pl-green)]">Browse fixtures <ArrowRight size={13} /></Link></div>}
         </section>
-      )}
-
-      <div className="grid md:grid-cols-3 gap-8">
-        {/* Upcoming Matches */}
-        <div className="md:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-white/50 uppercase tracking-widest">Upcoming Matches</h2>
-            <Link href="/matches" className="text-xs text-[#00ff85] hover:underline">View all →</Link>
-          </div>
-          {isLoading ? (
-            <div className="grid sm:grid-cols-2 gap-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="bg-white/5 border border-white/10 rounded-xl h-36 animate-pulse" />
-              ))}
-            </div>
-          ) : matches.length > 0 ? (
-            <div className="grid sm:grid-cols-2 gap-3">
-              {matches.map((m: MatchListItem) => <MatchCard key={m.id} match={m} />)}
-            </div>
-          ) : (
-            <div className="text-center py-16 text-white/30 text-sm">
-              No upcoming matches found.
-            </div>
-          )}
-        </div>
-
-        {/* Quick Predict sidebar */}
-        <div className="space-y-4">
-          <QuickPredict />
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-            <h3 className="text-xs font-bold text-white/50 uppercase tracking-widest mb-3">Navigate</h3>
-            <nav className="space-y-1">
-              {[
-                { href: '/matches', label: '📅 All Matches' },
-                { href: '/teams', label: '🛡️ Teams' },
-                { href: '/predictions', label: '📊 Prediction History' },
-                { href: '/model', label: '🤖 Model Info' },
-              ].map(({ href, label }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className="flex items-center px-3 py-2 rounded-lg text-sm text-white/70 hover:bg-white/10 hover:text-white transition-colors"
-                >
-                  {label}
-                </Link>
-              ))}
-            </nav>
-          </div>
-        </div>
+        <aside><MatchEstimator /></aside>
       </div>
+      <p className="mt-10 border-t border-[var(--border)] pt-4 text-center text-[0.68rem] leading-5 text-[var(--subtle)]">Match outcome probabilities are estimates, not guarantees.</p>
     </main>
   )
 }
