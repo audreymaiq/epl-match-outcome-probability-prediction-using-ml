@@ -3,105 +3,186 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: dark;
+  --background: #100d16;
+  --background-raised: #17121e;
+  --surface: #19141e;
+  --surface-raised: #211a28;
+  --foreground: #f7f4fa;
+  --muted: #aca3b6;
+  --subtle: #80758b;
+  --border: rgba(232, 218, 246, 0.11);
+  --border-strong: rgba(232, 218, 246, 0.18);
   --pl-purple: #3d195b;
-  --pl-purple-light: #5a2d82;
-  --pl-purple-dark: #2a1140;
-  --pl-green: #00ff85;
-  --pl-green-dark: #00cc6a;
-  --pl-white: #ffffff;
-  --pl-off-white: #f8f6fb;
-  --pl-gray-light: #e8e0f0;
-
-  --foreground: #1a1a2e;
-  --background: #f8f6fb;
-  --card-bg: #ffffff;
-  --card-border: #e8e0f0;
-  --muted: #6b7280;
+  --pl-green: #8bf0b2;
+  --danger: #ff8b91;
+  --warning: #f4c86a;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground: #f0eaf8;
-    --background: #12061e;
-    --card-bg: #1e0d33;
-    --card-border: #3d195b;
-    --muted: #9ca3af;
-  }
+* {
+  box-sizing: border-box;
 }
 
-@layer base {
-  * {
-    box-sizing: border-box;
-  }
-
-  body {
-    background-color: var(--background);
-    color: var(--foreground);
-    @apply font-sans antialiased;
-  }
-
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight;
-  }
-}
-
-@layer components {
-  .pl-card {
-    background-color: var(--card-bg);
-    border: 1px solid var(--card-border);
-    @apply rounded-xl shadow-sm transition-shadow hover:shadow-md;
-  }
-
-  .pl-badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .pl-btn-primary {
-    background-color: var(--pl-purple);
-    @apply text-white px-4 py-2 rounded-lg font-medium transition-colors hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2;
-    --tw-ring-color: var(--pl-purple);
-  }
-
-  .pl-btn-secondary {
-    @apply bg-transparent border border-pl-purple text-pl-purple px-4 py-2 rounded-lg font-medium transition-colors hover:bg-pl-purple hover:text-white focus:outline-none;
-  }
-
-  .pl-input {
-    @apply w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pl-purple bg-white dark:bg-gray-800;
-  }
-
-  .pl-select {
-    @apply w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pl-purple bg-white dark:bg-gray-800 cursor-pointer;
-  }
-}
-
-/* Skeleton animation */
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-.skeleton {
-  background: linear-gradient(90deg, #e0d8ea 25%, #f0eaf8 50%, #e0d8ea 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s infinite;
-  @apply rounded;
-}
-
-/* Probability bar animations */
-.prob-bar {
-  @apply h-full rounded-full transition-all duration-700 ease-out;
-}
-
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
+html {
+  min-height: 100%;
   background: var(--background);
+  scroll-behavior: smooth;
 }
-::-webkit-scrollbar-thumb {
-  background: var(--pl-purple-light, #5a2d82);
-  border-radius: 3px;
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: "ss01" on;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  color: #111018;
+  background: var(--pl-green);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--pl-green);
+  outline-offset: 3px;
+}
+
+.page-frame {
+  width: min(100% - 2rem, 1240px);
+  margin-inline: auto;
+}
+
+.surface {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface);
+}
+
+.surface-quiet {
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: var(--surface);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  color: var(--pl-green);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  content: none;
+}
+
+.page-title {
+  color: var(--foreground);
+  font-size: clamp(1.8rem, 4vw, 2.65rem);
+  font-weight: 720;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
+.field-control {
+  min-height: 2.8rem;
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.45rem;
+  background: #17121e;
+  color: var(--foreground);
+  padding: 0.7rem 0.85rem;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.field-control:hover {
+  border-color: rgba(139, 240, 178, 0.38);
+}
+
+.field-control::placeholder {
+  color: var(--subtle);
+}
+
+.field-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.button-primary,
+.button-secondary {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border-radius: 0.45rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.button-primary {
+  border: 1px solid var(--pl-green);
+  background: var(--pl-green);
+  color: #122117;
+}
+
+.button-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #a2f6c1;
+}
+
+.button-secondary {
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--foreground);
+}
+
+.button-secondary:hover:not(:disabled) {
+  border-color: rgba(139, 240, 178, 0.38);
+  background: rgba(139, 240, 178, 0.07);
+}
+
+.button-primary:disabled,
+.button-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.data-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
