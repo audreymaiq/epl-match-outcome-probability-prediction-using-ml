@@ -29,6 +29,7 @@ class MatchService:
         self,
         season_name: Optional[str] = None,
         status: Optional[str] = None,
+        team_id: Optional[int] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Tuple[List[MatchListItem], int]:
@@ -45,6 +46,9 @@ class MatchService:
         if status:
             filters.append("m.status = :status")
             params["status"] = status.upper()
+        if team_id is not None:
+            filters.append("(m.home_team_id = :team_id OR m.away_team_id = :team_id)")
+            params["team_id"] = team_id
 
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params["limit"] = page_size
@@ -63,7 +67,7 @@ class MatchService:
             JOIN "Teams" ht    ON ht.id = m.home_team_id
             JOIN "Teams" at    ON at.id = m.away_team_id
             {where}
-            ORDER BY m.match_datetime DESC
+            ORDER BY m.match_datetime {('ASC' if status and status.upper() == 'SCHEDULED' else 'DESC')}
             LIMIT :limit OFFSET :offset
         """
         count_sql = f"""
@@ -145,8 +149,8 @@ class MatchService:
             stadium=StadiumSchema(id=row.st_id, name=row.st_name, city=row.st_city, capacity=row.st_cap) if row.st_id else None,
             referee=RefereeSchema(id=row.ref_id, name=row.ref_name, country=row.ref_country) if row.ref_id else None,
             attendance=row.attendance,
-            home_possession=float(row.h_poss) if row.h_poss else None,
-            away_possession=float(row.a_poss) if row.a_poss else None,
+            home_possession=float(row.h_poss) if row.h_poss is not None else None,
+            away_possession=float(row.a_poss) if row.a_poss is not None else None,
             home_shots=row.h_shots,
             away_shots=row.a_shots,
             home_shots_on_target=row.h_sot,
