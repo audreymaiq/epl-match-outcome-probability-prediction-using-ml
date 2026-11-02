@@ -6,6 +6,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+VALID_ENTITY_TYPES = frozenset({
+    "team", "player", "match", "stadium", "league", "season", "referee"
+})
+
 
 class MatchStatus(str, Enum):
     """
