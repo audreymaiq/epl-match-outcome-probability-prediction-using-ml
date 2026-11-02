@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+venv/
+.venv/
+
+# Environment
+.env
+!.env.sample
+!.env.test
+
+# Runtime artifacts - NEVER commit these
+cache/
+logs/*.log
+data/raw/*.csv
+models/*.pkl
+models/*.joblib
+
+# SQLite cache
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+.ipynb_checkpoints/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Project management (not code)
+materials/
+report/
