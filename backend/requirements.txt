@@ -18,6 +18,7 @@ pydantic>=2.7.0,<3.0
 pydantic-settings>=2.3.0,<3.0
 python-dotenv>=1.0.0,<2.0
 pytz>=2024.1
+python-dateutil>=2.9.0,<3.0
 
 # ── FastAPI (REST API) ───────────────────────────────────────
 fastapi>=0.115.0,<1.0
@@ -38,7 +39,6 @@ catboost>=1.2.5,<2.0
 
 # ── ML hyperparameter tuning ─────────────────────────────────
 optuna>=3.6.0,<4.0
-optuna-integration[sklearn]>=3.6.0,<4.0
 
 # ── ML experiment tracking ───────────────────────────────────
 mlflow>=2.16.0,<3.0
@@ -57,6 +57,7 @@ joblib>=1.4.0,<2.0         # model serialisation
 prometheus-fastapi-instrumentator>=7.0.0,<8.0
 prometheus-client>=0.20.0,<1.0
 structlog>=24.1.0,<25.0
+python-json-logger>=2.0.0,<4.0
 
 # ── Testing ──────────────────────────────────────────────────
 pytest>=8.2.0,<9.0
