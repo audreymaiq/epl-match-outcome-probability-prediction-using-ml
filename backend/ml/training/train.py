@@ -7,7 +7,7 @@ Pipeline:
   2. Walk-forward cross-validation (WalkForwardCV)
   3. Optional Optuna hyperparameter tuning (per model)
   4. Stacking ensemble (XGBoost + LightGBM + CatBoost → Logistic meta-learner)
-  5. Probability calibration (Isotonic regression - best for football)
+  5. Probability calibration on a later held-out window
   6. MLflow experiment tracking
   7. Model serialisation to disk
 
@@ -15,42 +15,60 @@ Model architecture:
   - Base learners: XGBoost, LightGBM, CatBoost (diverse, complementary)
   - Meta-learner: Logistic Regression with L2 (interpretable, calibrated)
   - Calibration: Isotonic regression on held-out calibration set
-  - Class weights: Draw upweighted 1.8× (hardest outcome to predict)
-
-Target: accuracy > 55%, log-loss < 0.96, draw F1 > 0.30
+  - Class weights: optional; no assumed draw weight in the default pipeline
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Protocol
 
 import numpy as np
 import pandas as pd
 import joblib
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.calibration import CalibratedClassifierCV
+from sklearn.base import clone
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 
-from ml.training.walk_forward_cv import WalkForwardCV, compute_metrics
-from utils.db_connector import DatabaseConnector
-from utils.logging_config import setup_logging
+from ml.training.walk_forward_cv import WalkForwardCV
 
 logger = logging.getLogger(__name__)
+
+
+class ProbabilityCalibrator(Protocol):
+    def transform(self, probabilities: np.ndarray) -> np.ndarray: ...
+
+
+class MulticlassCalibrator:
+    """Apply fitted one-vs-rest calibrators and normalize the result."""
+
+    def __init__(self, calibrators: List[Any]):
+        self._cals = calibrators
+
+    def transform(self, proba: np.ndarray) -> np.ndarray:
+        calibrated = np.column_stack([
+            calibrator.predict(proba[:, cls])
+            for cls, calibrator in enumerate(self._cals)
+        ])
+        row_sums = calibrated.sum(axis=1, keepdims=True)
+        return np.divide(
+            calibrated,
+            row_sums,
+            out=proba.copy(),
+            where=row_sums > 1e-9,
+        )
 
 # Label encoding
 LABEL_MAP     = {"H": 0, "D": 1, "A": 2}
 LABEL_REVERSE = {0: "H", 1: "D", 2: "A"}
-CLASS_WEIGHTS = {0: 1.0, 1: 1.8, 2: 1.0}  # Upweight Draw
 
 # Model output path
 MODELS_DIR = Path(__file__).parent.parent.parent / "models"
@@ -109,11 +127,58 @@ def _make_preprocessor():
     ])
 
 
+def _chronological_splits(
+    n_samples: int,
+    n_splits: int,
+    timestamps: Optional[np.ndarray] = None,
+):
+    """Create expanding-window splits without separating simultaneous matches."""
+    from sklearn.model_selection import TimeSeriesSplit
+
+    if timestamps is None:
+        return list(TimeSeriesSplit(n_splits=n_splits).split(np.arange(n_samples)))
+    if len(timestamps) != n_samples:
+        raise ValueError("timestamps must contain one value per training sample.")
+
+    sample_times = pd.to_datetime(timestamps, utc=True)
+    unique_times = pd.DatetimeIndex(sample_times.unique()).sort_values()
+    group_splits = TimeSeriesSplit(n_splits=n_splits).split(unique_times)
+    row_splits = []
+    for train_groups, valid_groups in group_splits:
+        train_mask = sample_times.isin(unique_times[train_groups])
+        valid_mask = sample_times.isin(unique_times[valid_groups])
+        row_splits.append((np.flatnonzero(train_mask), np.flatnonzero(valid_mask)))
+    return row_splits
+
+
+def _chronological_holdout_masks(
+    n_samples: int,
+    calibration_size: int,
+    timestamps: Optional[np.ndarray] = None,
+):
+    """Reserve a latest-time calibration set without splitting a kickoff group."""
+    if timestamps is None:
+        calibration_start = n_samples - calibration_size
+        base_mask = np.arange(n_samples) < calibration_start
+    else:
+        if len(timestamps) != n_samples:
+            raise ValueError("timestamps must contain one value per training sample.")
+        sample_times = pd.to_datetime(timestamps, utc=True)
+        cutoff = np.sort(sample_times.asi8)[n_samples - calibration_size]
+        base_mask = sample_times.asi8 < cutoff
+    return base_mask, ~base_mask
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Optuna tuning (optional)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _tune_xgboost(X_train, y_train, n_trials: int = 30) -> Dict:
+def _tune_xgboost(
+    X_train,
+    y_train,
+    n_trials: int = 30,
+    timestamps: Optional[np.ndarray] = None,
+) -> Dict:
     """Optuna search for XGBoost hyperparameters."""
     try:
         import optuna
@@ -123,6 +188,7 @@ def _tune_xgboost(X_train, y_train, n_trials: int = 30) -> Dict:
         return {}
 
     from sklearn.model_selection import cross_val_score
+    cv_splits = _chronological_splits(len(X_train), n_splits=3, timestamps=timestamps)
 
     def objective(trial):
         params = {
@@ -136,7 +202,13 @@ def _tune_xgboost(X_train, y_train, n_trials: int = 30) -> Dict:
             "reg_lambda":       trial.suggest_float("reg_lambda", 0.5, 5.0),
         }
         model = _make_xgboost(params)
-        score = cross_val_score(model, X_train, y_train, cv=3, scoring="neg_log_loss").mean()
+        score = cross_val_score(
+            model,
+            X_train,
+            y_train,
+            cv=cv_splits,
+            scoring="neg_log_loss",
+        ).mean()
         return -score
 
     study = optuna.create_study(direction="minimize")
@@ -174,10 +246,9 @@ class StackingEnsemble:
             ("cat", _make_catboost(cat_params)),
         ]
         self._meta = LogisticRegression(
-            C=1.0, max_iter=2000, multi_class="multinomial",
-            solver="lbfgs", random_state=42,
+            C=1.0, max_iter=2000, solver="lbfgs", random_state=42,
         )
-        self._calibrator: Optional[CalibratedClassifierCV] = None
+        self._calibrator: Optional[ProbabilityCalibrator] = None
         self.classes_ = np.array([0, 1, 2])
 
     def fit(
@@ -186,6 +257,7 @@ class StackingEnsemble:
         y: np.ndarray,
         sample_weight: Optional[np.ndarray] = None,
         calibration_fraction: float = 0.15,
+        timestamps: Optional[np.ndarray] = None,
     ) -> "StackingEnsemble":
         """
         Train the full ensemble.
@@ -193,36 +265,81 @@ class StackingEnsemble:
         Splits data: 85% for base learners + meta, 15% for calibration.
         """
         n = len(X)
+        if not 0 < calibration_fraction < 1:
+            raise ValueError("calibration_fraction must be between 0 and 1.")
+        if n < 140:
+            raise ValueError(
+                "Stacking training needs at least 90 pre-calibration matches "
+                "and 50 calibration matches."
+            )
         cal_n = max(int(n * calibration_fraction), 50)
-        # Chronological split - calibration is always last (most recent)
-        train_end = n - cal_n
-        X_base, X_cal = X[:train_end], X[train_end:]
-        y_base, y_cal = y[:train_end], y[train_end:]
-        sw_base = sample_weight[:train_end] if sample_weight is not None else None
+        # Keep the latest timestamps for calibration and never split simultaneous fixtures.
+        base_mask, calibration_mask = _chronological_holdout_masks(n, cal_n, timestamps)
+        train_end = int(base_mask.sum())
+        if train_end < 90 or int(calibration_mask.sum()) < 50:
+            raise ValueError(
+                "Stacking training needs at least 90 pre-calibration matches "
+                "and 50 calibration matches."
+            )
+        X_base, X_cal = X[base_mask], X[calibration_mask]
+        y_base, y_cal = y[base_mask], y[calibration_mask]
+        if np.unique(y_base).size != len(self.classes_) or np.unique(y_cal).size != len(self.classes_):
+            raise ValueError("Both the base-training and calibration windows must contain H, D, and A outcomes.")
+        sw_base = sample_weight[base_mask] if sample_weight is not None else None
 
-        # Preprocess
+        # Build chronological out-of-fold predictions for the meta learner.
+        # Each row is predicted by base models that were trained only on earlier rows.
+        n_classes = len(self.classes_)
+        meta_oof = np.full((len(X_base), len(self._base_learners) * n_classes), np.nan)
+        base_timestamps = timestamps[base_mask] if timestamps is not None else None
+        n_time_groups = (
+            len(pd.to_datetime(base_timestamps, utc=True).unique())
+            if base_timestamps is not None
+            else len(X_base)
+        )
+        n_splits = min(5, len(X_base) // 30 - 1, n_time_groups // 2 - 1)
+        if n_splits < 2:
+            raise ValueError("At least three distinct chronological training windows are required for stacking.")
+        splits = _chronological_splits(len(X_base), n_splits, base_timestamps)
+        for fold, (fit_idx, valid_idx) in enumerate(splits, start=1):
+            fold_preprocessor = _make_preprocessor()
+            X_fit = fold_preprocessor.fit_transform(X_base[fit_idx])
+            X_valid = fold_preprocessor.transform(X_base[valid_idx])
+            y_fit = y_base[fit_idx]
+            if np.unique(y_fit).size < n_classes:
+                logger.warning("Skipping stacking OOF fold %d: training window lacks an outcome class.", fold)
+                continue
+            fold_weights = sw_base[fit_idx] if sw_base is not None else None
+
+            fold_predictions = []
+            for name, estimator in self._base_learners:
+                model = clone(estimator)
+                fit_params = {"sample_weight": fold_weights} if fold_weights is not None else {}
+                model.fit(X_fit, y_fit, **fit_params)
+
+                fold_proba = model.predict_proba(X_valid)
+                aligned = np.zeros((len(valid_idx), n_classes), dtype=float)
+                aligned[:, model.classes_.astype(int)] = fold_proba
+                fold_predictions.append(aligned)
+
+            meta_oof[valid_idx] = np.hstack(fold_predictions)
+            logger.info("Stacking OOF fold %d: %d training, %d validation samples.",
+                        fold, len(fit_idx), len(valid_idx))
+
+        oof_mask = np.isfinite(meta_oof).all(axis=1)
+        if not oof_mask.any() or np.unique(y_base[oof_mask]).size != n_classes:
+            raise ValueError("Chronological out-of-fold samples must cover H, D, and A outcomes.")
+        oof_weights = sw_base[oof_mask] if sw_base is not None else None
+        self._meta.fit(meta_oof[oof_mask], y_base[oof_mask], sample_weight=oof_weights)
+
+        # Fit final base learners on the complete pre-calibration window.
         X_base_pp = self._preprocessor.fit_transform(X_base)
-        X_cal_pp  = self._preprocessor.transform(X_cal)
-
-        # Train base learners on base set
-        logger.info("Training base learners on %d samples...", len(X_base))
+        X_cal_pp = self._preprocessor.transform(X_cal)
+        logger.info("Training final base learners on %d samples...", len(X_base))
         for name, model in self._base_learners:
-            logger.info("  Training %s...", name)
-            try:
-                if sw_base is not None:
-                    model.fit(X_base_pp, y_base, sample_weight=sw_base)
-                else:
-                    model.fit(X_base_pp, y_base)
-            except TypeError:
-                # CatBoost has different sample_weight API
-                model.fit(X_base_pp, y_base)
+            fit_params = {"sample_weight": sw_base} if sw_base is not None else {}
+            model.fit(X_base_pp, y_base, **fit_params)
             logger.info("  %s trained.", name)
-
-        # Build meta-features on base set (in-sample, necessary for meta-learner)
-        meta_train_X = np.hstack([
-            model.predict_proba(X_base_pp) for _, model in self._base_learners
-        ])
-        self._meta.fit(meta_train_X, y_base, sample_weight=sw_base)
 
         # Build meta-features on calibration set (out-of-sample)
         meta_cal_X = np.hstack([
@@ -231,7 +348,6 @@ class StackingEnsemble:
         meta_proba_cal = self._meta.predict_proba(meta_cal_X)
 
         # Calibrate using isotonic regression
-        from sklearn.calibration import calibration_curve
         logger.info("Calibrating on %d samples...", len(X_cal))
         self._calibrator = _fit_calibrator(meta_proba_cal, y_cal)
 
@@ -252,7 +368,7 @@ class StackingEnsemble:
         return np.argmax(self.predict_proba(X), axis=1)
 
 
-def _fit_calibrator(proba: np.ndarray, y: np.ndarray):
+def _fit_calibrator(proba: np.ndarray, y: np.ndarray) -> ProbabilityCalibrator:
     """
     Fit isotonic calibration for multiclass output.
     Returns a callable that maps raw proba → calibrated proba.
@@ -263,17 +379,6 @@ def _fit_calibrator(proba: np.ndarray, y: np.ndarray):
         iso = IsotonicRegression(out_of_bounds="clip")
         iso.fit(proba[:, cls], (y == cls).astype(float))
         calibrators.append(iso)
-
-    class MulticlassCalibrator:
-        def __init__(self, calibrators):
-            self._cals = calibrators
-        def transform(self, proba: np.ndarray) -> np.ndarray:
-            cal = np.column_stack([
-                self._cals[c].predict(proba[:, c]) for c in range(3)
-            ])
-            # Renormalize rows to sum to 1
-            row_sums = cal.sum(axis=1, keepdims=True)
-            return cal / np.maximum(row_sums, 1e-9)
 
     return MulticlassCalibrator(calibrators)
 
@@ -304,6 +409,9 @@ def train(
     Returns:
         Dict with CV metrics and model path.
     """
+    from utils.db_connector import DatabaseConnector
+    from utils.logging_config import setup_logging
+
     setup_logging()
     logger.info("=" * 60)
     logger.info("Training pipeline started | Season: %s | Tune: %s", season_name or "ALL", tune)
@@ -314,7 +422,7 @@ def train(
     with DatabaseConnector.session_scope() as session:
         from ml.features.feature_extractor import FeatureExtractor
         extractor = FeatureExtractor(session)
-        df = extractor.extract_all_finished_matches(season_name=season_name, min_match_week=6)
+        df = extractor.extract_all_finished_matches(season_name=season_name)
 
     if df.empty:
         raise RuntimeError("No training data found. Run ELT pipeline first.")
@@ -331,11 +439,10 @@ def train(
     # Label encoding
     y = np.array([LABEL_MAP[o] for o in df["outcome"]])
     X = df[feature_cols].fillna(0).values.astype(np.float32)
-    sample_weights = np.array([CLASS_WEIGHTS[yi] for yi in y])
 
     # ── 2. Walk-forward CV ────────────────────────────────────────────────
     logger.info("Running walk-forward cross-validation...")
-    cv = WalkForwardCV(n_test_seasons=1, min_train_seasons=2, gap_rounds=5)
+    cv = WalkForwardCV(n_test_seasons=1, min_train_seasons=2, gap_rounds=0)
 
     # Quick CV with LightGBM (fast) to estimate baseline
     lgb_cv = _make_lightgbm()
@@ -346,12 +453,21 @@ def train(
     xgb_params, lgb_params, cat_params = {}, {}, {}
     if tune:
         logger.info("Tuning XGBoost (%d trials)...", n_tune_trials)
-        xgb_params = _tune_xgboost(X, y, n_trials=n_tune_trials)
+        xgb_params = _tune_xgboost(
+            X,
+            y,
+            n_trials=n_tune_trials,
+            timestamps=df["match_datetime"].to_numpy(),
+        )
 
     # ── 4. Train final ensemble on ALL data ───────────────────────────────
     logger.info("Training final StackingEnsemble on all %d samples...", len(X))
     ensemble = StackingEnsemble(xgb_params, lgb_params, cat_params)
-    ensemble.fit(X, y, sample_weight=sample_weights)
+    ensemble.fit(
+        X,
+        y,
+        timestamps=df["match_datetime"].to_numpy(),
+    )
 
     # ── 5. Final holdout evaluation (last season) ─────────────────────────
     final_metrics = {}
@@ -381,6 +497,7 @@ def train(
                 "training_seasons": sorted(df["season_name"].unique().tolist()) if "season_name" in df.columns else [],
                 "n_features": len(feature_cols),
                 "algorithm": "StackingEnsemble(XGB+LGB+CatBoost→LR)",
+                "cv_evaluation_model": "LightGBM baseline",
                 "walk_forward_folds": cv_result.n_folds,
                 "cv_metrics": cv_result.summary,
             },
@@ -419,6 +536,8 @@ def train(
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 def main() -> int:
+    from utils.logging_config import setup_logging
+
     parser = argparse.ArgumentParser(
         description="Train EPL Match Outcome Prediction Model",
         epilog='python -m ml.training.train --tune --seasons "2023/24"',
@@ -450,4 +569,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Invoke the importable module so serialized estimator classes keep a stable
+    # module path when this file is launched with ``python -m``.
+    from ml.training.train import main as module_main
+
+    sys.exit(module_main())
