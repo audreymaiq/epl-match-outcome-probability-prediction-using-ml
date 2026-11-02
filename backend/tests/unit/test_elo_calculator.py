@@ -68,6 +68,12 @@ class TestEloUpdates:
         assert delta > 15  # upset → large gain
 
 
+    def test_k_factor_matches_adaptive_rules(self, calc):
+        assert calc.k_factor(match_week=1) == pytest.approx(32.0)
+        assert calc.k_factor(match_week=6, is_top6_clash=True) == pytest.approx(28.0)
+        assert calc.k_factor(match_week=6) == pytest.approx(20.0)
+
+
 class TestEloProbabilities:
     """Tests for elo_to_win_probability() - (p_home, p_draw, p_away) tuple."""
 
