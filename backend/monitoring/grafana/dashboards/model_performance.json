@@ -1,0 +1,34 @@
+{
+  "__inputs": [{ "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" }],
+  "title": "EPL Model Performance",
+  "uid": "epl-model-perf",
+  "tags": ["epl", "ml", "model"],
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "5m",
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Predictions Today",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "increase(http_requests_total{job=\"epl-api\",handler=\"/api/v1/predictions\",method=\"POST\"}[24h])", "legendFormat": "predictions" }]
+    },
+    {
+      "id": 2, "type": "stat", "title": "P(Home Win) Avg",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "description": "Average predicted home win probability (should be ~0.44-0.48 in EPL)"
+    },
+    {
+      "id": 3, "type": "stat", "title": "P(Draw) Avg",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "description": "Average predicted draw probability (should be ~0.24-0.28 in EPL)"
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Prediction Volume Over Time",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "rate(http_requests_total{job=\"epl-api\",handler=\"/api/v1/predictions\"}[5m])", "legendFormat": "predictions/s" }
+      ]
+    }
+  ]
+}
+
