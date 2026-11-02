@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1.7
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.pipeline - ELT + Feature Pipeline Runner
+#
+# Used for both:
+#   - ELT pipeline: python -m elt_pipeline.orchestrator
+#   - Feature pipeline: python -m feature_pipeline.orchestrator
+#   - Training: python -m ml.training.train
+#
+# Run via Docker Compose profiles:
+#   docker compose --profile pipeline up pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+
+FROM python:3.11-slim AS runtime
+
+LABEL description="ELT + Feature Pipeline - Premier League data ingestion"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /install /usr/local
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /app
+
+COPY --chown=appuser:appuser . .
+
+RUN mkdir -p /app/models /app/logs /app/cache && chown -R appuser:appuser /app
+
+USER appuser
+
+# Default: run ELT pipeline with sofascore provider.
+# Override CMD via docker-compose to run feature pipeline or training.
+CMD ["python", "-m", "elt_pipeline.orchestrator", "--provider", "sofascore", "--log-level", "INFO"]
+
