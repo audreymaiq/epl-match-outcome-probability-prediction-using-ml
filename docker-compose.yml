@@ -1,0 +1,248 @@
+version: '3.9'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Premier League Match Outcome Probability Prediction - Root Compose
+# Orchestrates: postgres, redis, mlflow, api, pipeline, frontend, monitoring
+#
+# Usage:
+#   docker compose up -d               → start all core services
+#   docker compose --profile pipeline run pipeline  → run ELT once
+#   docker compose logs -f api         → tail API logs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Shared environment anchors ────────────────────────────────────────────────
+x-common-env: &common-env
+  PYTHONUNBUFFERED: "1"
+  PYTHONIOENCODING: "utf-8"
+  TZ: "UTC"
+
+x-backend-env: &backend-env
+  <<: *common-env
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: ${DB_NAME:-epl_db}
+  DB_USER: ${DB_USER:-epl_user}
+  DB_PASSWORD: ${DB_PASSWORD:-epl_password}
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL 17 - primary data store
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: epl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-epl_db}
+      POSTGRES_USER: ${DB_USER:-epl_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-epl_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    ports:
+      - "${DB_PORT_HOST:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/docker/postgres/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./backend/docker/postgres/migrations/001_add_leagues_external_id.sql:/docker-entrypoint-initdb.d/02-migration-001.sql:ro
+      - ./backend/docker/postgres/migrations/002_add_elo_ratings.sql:/docker-entrypoint-initdb.d/03-migration-002.sql:ro
+      - ./backend/docker/postgres/migrations/003_add_match_id_to_squad_availability.sql:/docker-entrypoint-initdb.d/04-migration-003.sql:ro
+      - ./backend/docker/postgres/migrations/005_reconcile_feature_tables.sql:/docker-entrypoint-initdb.d/05-migration-005.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-epl_user} -d ${DB_NAME:-epl_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - epl-network
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis - caching layer (scraping cache, rate limiter)
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: epl-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - epl-network
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # MLflow - experiment tracking
+  # ─────────────────────────────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.0
+    container_name: epl-mlflow
+    restart: unless-stopped
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${DB_USER:-epl_user}:${DB_PASSWORD:-epl_password}@postgres:5432/${DB_NAME:-epl_db}
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    environment:
+      <<: *common-env
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - epl-network
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # FastAPI Prediction API
+  # ─────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile.api
+    container_name: epl-api
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      MODEL_PATH: /app/models/ensemble_model.pkl
+      WORKERS: ${API_WORKERS:-2}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./backend/models:/app/models:ro
+      - ./backend/logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - epl-network
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ELT Pipeline runner (profile: pipeline - run once on demand)
+  # docker compose --profile pipeline run --rm pipeline
+  # ─────────────────────────────────────────────────────────────────────────
+  pipeline:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile.pipeline
+    container_name: epl-pipeline
+    restart: "no"
+    environment:
+      <<: *backend-env
+      SOFASCORE_LEAGUE_ID: ${SOFASCORE_LEAGUE_ID:-17}
+      SOFASCORE_SEASON_ID: ${SOFASCORE_SEASON_ID:-52186}
+      PROVIDER: ${PROVIDER:-sofascore}
+    volumes:
+      - ./backend/logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - epl-network
+    profiles:
+      - pipeline
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Next.js Frontend
+  # ─────────────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: epl-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - epl-network
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Prometheus - metrics scraping
+  # ─────────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: epl-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - epl-network
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Grafana - dashboards
+  # ─────────────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: epl-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./backend/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./backend/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - epl-network
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Networks
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  epl-network:
+    driver: bridge
+    name: epl-network
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Named volumes (survive container restarts)
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    name: epl-postgres-data
+  redis_data:
+    name: epl-redis-data
+  mlflow_artifacts:
+    name: epl-mlflow-artifacts
+  prometheus_data:
+    name: epl-prometheus-data
+  grafana_data:
+    name: epl-grafana-data
