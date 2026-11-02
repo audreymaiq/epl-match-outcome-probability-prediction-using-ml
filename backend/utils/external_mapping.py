@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import text, exc
 from sqlalchemy.orm import Session
 from utils.db_connector import DatabaseConnector  
-from config.business_constants import VALID_ENTITY_TYPES  
+from config.core_constants import VALID_ENTITY_TYPES
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,9 +52,9 @@ def get_internal_id(
         else:
             return _execute_query(session, query, params)
             
-    except exc.SQLAlchemyError as e:
-        logger.error(f"Database error in get_internal_id: {str(e)}")
-        return None
+    except exc.SQLAlchemyError:
+        logger.exception("Database error in get_internal_id")
+        raise
 
 def _execute_query(session: Session, query, params) -> Optional[int]:
     """Thực thi truy vấn và trả về kết quả"""
