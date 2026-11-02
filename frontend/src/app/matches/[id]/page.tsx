@@ -1,191 +1,41 @@
 'use client'
 
-import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useMatch, usePredict } from '@/lib/hooks'
 import { ProbabilityBars } from '@/components/probability-bars'
-import { FormBadges } from '@/components/form-badges'
-import type { MatchDetail, PredictResponse } from '@/lib/types'
+import { PageHeading } from '@/components/page-heading'
+import { TeamMark } from '@/components/team-mark'
+import { ArrowLeft, MapPin, UserRound, UsersRound } from 'lucide-react'
 
-function InfoRow({ label, value }: { label: string; value?: string | number | null }) {
-  if (!value && value !== 0) return null
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-      <span className="text-xs text-white/40">{label}</span>
-      <span className="text-xs font-medium text-white">{value}</span>
-    </div>
-  )
-}
-
-function confidenceLabel(c: number): string {
-  return c >= 0.6 ? 'high' : c >= 0.45 ? 'medium' : 'low'
-}
-
-function confidenceColor(c: number): string {
-  return c >= 0.6 ? 'text-[#00ff85]' : c >= 0.45 ? 'text-yellow-400' : 'text-white/50'
+function MatchStat({ label, home, away }: { label: string; home?: number | string | null; away?: number | string | null }) {
+  return <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[var(--border)] py-3 last:border-0"><span className="text-right font-mono text-sm font-bold tabular-nums text-white">{home ?? '—'}</span><span className="min-w-28 text-center text-xs text-[var(--muted)]">{label}</span><span className="font-mono text-sm font-bold tabular-nums text-white">{away ?? '—'}</span></div>
 }
 
 export default function MatchDetailPage() {
   const params = useParams()
   const matchId = Number(params.id)
   const { data: match, isLoading, isError } = useMatch(matchId)
-  const { mutate: predict, data: prediction, isPending, reset } = usePredict()
-  const [hasPredicted, setHasPredicted] = useState(false)
+  const prediction = usePredict()
 
-  const handlePredict = () => {
-    if (!match) return
-    predict(
-      {
-        home_team_id: match.home_team.id,
-        away_team_id: match.away_team.id,
-        match_datetime: match.match_datetime,
-      },
-      { onSuccess: () => setHasPredicted(true) }
-    )
-  }
+  if (isLoading) return <main className="page-frame space-y-4 py-12"><div className="surface-quiet h-56 animate-pulse" /><div className="surface-quiet h-64 animate-pulse" /></main>
+  if (isError || !match) return <main className="page-frame py-16 text-center"><p className="text-lg font-bold text-white">Match could not be found</p><p className="mt-2 text-sm text-[var(--muted)]">The fixture may have been removed or the match service is unavailable.</p><Link className="button-secondary mt-5" href="/matches"><ArrowLeft size={14} /> Back to fixtures</Link></main>
 
-  const displayPrediction: PredictResponse | undefined = prediction ?? undefined
-
-  if (isLoading) {
-    return (
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-32 bg-white/5 rounded-2xl" />
-          <div className="h-64 bg-white/5 rounded-2xl" />
-        </div>
-      </main>
-    )
-  }
-
-  if (isError || !match) {
-    return (
-      <main className="max-w-4xl mx-auto px-4 py-8 text-center">
-        <p className="text-red-400">Match not found or API is offline.</p>
-        <Link href="/matches" className="text-[#00ff85] text-sm mt-2 inline-block hover:underline">← Back to Matches</Link>
-      </main>
-    )
-  }
-
-  const isFinished = match.status === 'FINISHED'
-
+  const finished = match.status === 'FINISHED'
+  const matchDate = new Date(match.match_datetime)
   return (
-    <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-      {/* Back */}
-      <Link href="/matches" className="text-xs text-white/40 hover:text-white/70 transition-colors">
-        ← Back to Matches
-      </Link>
+    <main className="page-frame pb-16 pt-8 sm:pt-12">
+      <Link href="/matches" className="mb-6 inline-flex items-center gap-2 text-xs font-semibold text-[var(--muted)] transition hover:text-white"><ArrowLeft size={14} /> All fixtures</Link>
+      <section className="relative overflow-hidden border-y border-white/[0.12] bg-[var(--surface)] px-5 py-8 sm:px-10 sm:py-10">
+        <p className="eyebrow justify-center">{match.season_name}{match.match_week ? ` · Matchweek ${match.match_week}` : ''} · {finished ? 'Full time' : match.status.toLowerCase()}</p>
+        <div className="mx-auto mt-8 grid max-w-4xl grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-8"><div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:text-left"><TeamMark team={match.home_team} size="lg" /><div><p className="text-base font-bold text-white sm:text-xl">{match.home_team.name}</p><p className="mt-1 text-xs text-[var(--muted)]">Home</p></div></div><div className="rounded-2xl border border-white/[0.1] bg-black/15 px-4 py-3 text-center sm:px-6">{finished ? <p className="font-mono text-3xl font-extrabold tabular-nums text-white sm:text-4xl">{match.home_goals ?? 0}<span className="px-2 text-[var(--subtle)]">:</span>{match.away_goals ?? 0}</p> : <p className="font-mono text-xl font-bold text-[var(--subtle)]">VS</p>}<p className="mt-1.5 text-[0.62rem] font-bold uppercase tracking-wider text-[var(--muted)]">{Number.isNaN(matchDate.getTime()) ? 'Date TBC' : matchDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p></div><div className="flex flex-col items-center gap-3 text-center sm:flex-row-reverse sm:text-right"><TeamMark team={match.away_team} size="lg" /><div><p className="text-base font-bold text-white sm:text-xl">{match.away_team.name}</p><p className="mt-1 text-xs text-[var(--muted)]">Away</p></div></div></div>
+      </section>
 
-      {/* Match header */}
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-        <div className="flex items-center gap-2 mb-5 justify-center">
-          <span className="text-xs text-white/30 font-medium">GW{match.match_week}</span>
-          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-            isFinished ? 'bg-white/10 text-white/40' :
-            match.status === 'LIVE' ? 'bg-red-500/20 text-red-400' :
-            'bg-[#00ff85]/20 text-[#00ff85]'
-          }`}>{match.status}</span>
-        </div>
-        <div className="flex items-center justify-center gap-6">
-          <div className="text-center flex-1">
-            <p className="text-xl font-bold text-white">{match.home_team.name}</p>
-            <p className="text-xs text-white/30 mt-1">Home</p>
-          </div>
-          <div className="text-center">
-            {isFinished ? (
-              <span className="text-4xl font-extrabold text-white">
-                {match.home_goals} – {match.away_goals}
-              </span>
-            ) : (
-              <span className="text-4xl font-extrabold text-white/20">vs</span>
-            )}
-          </div>
-          <div className="text-center flex-1">
-            <p className="text-xl font-bold text-white">{match.away_team.name}</p>
-            <p className="text-xs text-white/30 mt-1">Away</p>
-          </div>
-        </div>
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        <section className="surface p-5 sm:p-6"><div className="mb-5"><h2 className="text-lg font-bold text-white">Outcome probabilities</h2></div>{prediction.data ? <><ProbabilityBars probabilities={prediction.data.probabilities} predicted_outcome={prediction.data.predicted_outcome} homeTeam={match.home_team.name} awayTeam={match.away_team.name} /><div className="mt-5 flex flex-wrap justify-between gap-3 border-t border-[var(--border)] pt-4 text-xs"><span className="text-[var(--muted)]">Model confidence</span><span className="font-mono font-bold text-[var(--pl-green)]">{(prediction.data.confidence * 100).toFixed(0)}%</span><span className="text-[var(--muted)]">Version {prediction.data.model_version}</span></div></> : <div className="border-y border-dashed border-white/[0.12] py-6 text-center"><p className="text-sm text-[var(--muted)]">Generate an estimate for this fixture.</p><button className="button-primary mt-4" disabled={prediction.isPending} onClick={() => prediction.mutate({ match_id: match.id })}>{prediction.isPending ? 'Calculating…' : 'Generate prediction'}</button>{prediction.isError && <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{(prediction.error as Error)?.message || 'Prediction service unavailable.'}</p>}</div>}<p className="mt-4 text-[0.68rem] leading-5 text-[var(--subtle)]">Probabilities are estimates and do not guarantee a match result.</p></section>
+        <section className="surface p-5 sm:p-6"><h2 className="mb-4 text-lg font-bold text-white">Match information</h2><div className="space-y-4">{match.stadium?.name && <div className="flex gap-3"><MapPin size={16} className="mt-0.5 text-[var(--pl-green)]" /><div><p className="text-xs font-semibold text-white">{match.stadium.name}</p><p className="mt-1 text-xs text-[var(--muted)]">{match.stadium.city || 'Venue'}{match.stadium.capacity ? ` · Capacity ${match.stadium.capacity.toLocaleString()}` : ''}</p></div></div>}{match.referee?.name && <div className="flex gap-3"><UserRound size={16} className="mt-0.5 text-[var(--pl-green)]" /><div><p className="text-xs font-semibold text-white">{match.referee.name}</p><p className="mt-1 text-xs text-[var(--muted)]">Match official</p></div></div>}{match.attendance != null && <div className="flex gap-3"><UsersRound size={16} className="mt-0.5 text-[var(--pl-green)]" /><div><p className="text-xs font-semibold text-white">{match.attendance.toLocaleString()}</p><p className="mt-1 text-xs text-[var(--muted)]">Attendance</p></div></div>}{!match.stadium?.name && !match.referee?.name && match.attendance == null && <p className="text-sm text-[var(--muted)]">No additional match information is available.</p>}</div></section>
       </div>
-
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Prediction panel */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-4">
-          <h2 className="text-sm font-bold text-white/70">AI Prediction</h2>
-          {displayPrediction ? (
-            <>
-              <ProbabilityBars
-                probabilities={displayPrediction.probabilities}
-                predicted_outcome={displayPrediction.predicted_outcome}
-                homeTeam={match.home_team.name}
-                awayTeam={match.away_team.name}
-              />
-              <div className="flex items-center justify-between text-xs pt-2 border-t border-white/10">
-                <span className="text-white/30">Confidence</span>
-                <span className={`capitalize font-semibold ${confidenceColor(displayPrediction.confidence)}`}>
-                  {confidenceLabel(displayPrediction.confidence)} ({(displayPrediction.confidence * 100).toFixed(0)}%)
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-white/30">Model version</span>
-                <span className="text-white/50">{displayPrediction.model_version}</span>
-              </div>
-            </>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-white/30 text-sm mb-4">No prediction yet</p>
-              <button
-                onClick={handlePredict}
-                disabled={isPending}
-                className="bg-[#00ff85] text-[#3d195b] font-bold px-6 py-2.5 rounded-lg text-sm hover:bg-[#00ff85]/90 disabled:opacity-40 transition-all"
-              >
-                {isPending ? 'Predicting…' : 'Get Prediction'}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Match info */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-1">
-          <h2 className="text-sm font-bold text-white/70 mb-3">Match Info</h2>
-          <InfoRow label="Date" value={new Date(match.match_datetime).toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })} />
-          <InfoRow label="Stadium" value={match.stadium?.name} />
-          <InfoRow label="Referee" value={match.referee?.name} />
-          <InfoRow label="Season" value={match.season_name} />
-          <InfoRow label="Match Week" value={match.match_week ? `Gameweek ${match.match_week}` : undefined} />
-          {isFinished && match.attendance && <InfoRow label="Attendance" value={match.attendance.toLocaleString()} />}
-        </div>
-      </div>
-
-      {/* Match stats (finished only) */}
-      {isFinished && (match.home_possession || match.home_shots) && (
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
-          <h2 className="text-sm font-bold text-white/70 mb-4">Match Statistics</h2>
-          <div className="space-y-2">
-            {match.home_possession != null && (
-              <StatRow label="Possession" home={`${match.home_possession}%`} away={`${match.away_possession}%`} />
-            )}
-            {match.home_shots != null && (
-              <StatRow label="Shots" home={match.home_shots} away={match.away_shots} />
-            )}
-            {match.home_shots_on_target != null && (
-              <StatRow label="Shots on Target" home={match.home_shots_on_target} away={match.away_shots_on_target} />
-            )}
-            {match.home_corners != null && (
-              <StatRow label="Corners" home={match.home_corners} away={match.away_corners} />
-            )}
-          </div>
-        </div>
-      )}
+      {finished && [match.home_possession, match.away_possession, match.home_shots, match.away_shots, match.home_shots_on_target, match.away_shots_on_target, match.home_corners, match.away_corners].some((value) => value != null) && <section className="surface mt-5 p-5 sm:p-6"><p className="eyebrow">By the numbers</p><h2 className="mb-4 mt-2 text-xl font-bold text-white">Match statistics</h2>{match.home_possession != null && <MatchStat label="Possession" home={`${match.home_possession}%`} away={match.away_possession != null ? `${match.away_possession}%` : null} />}{match.home_shots != null && <MatchStat label="Shots" home={match.home_shots} away={match.away_shots} />}{match.home_shots_on_target != null && <MatchStat label="Shots on target" home={match.home_shots_on_target} away={match.away_shots_on_target} />}{match.home_corners != null && <MatchStat label="Corners" home={match.home_corners} away={match.away_corners} />}</section>}
     </main>
-  )
-}
-
-function StatRow({ label, home, away }: { label: string; home?: number | string | null; away?: number | string | null }) {
-  return (
-    <div className="flex items-center justify-between text-xs">
-      <span className="text-white font-medium w-16 text-right">{home ?? '-'}</span>
-      <span className="text-white/40 flex-1 text-center">{label}</span>
-      <span className="text-white font-medium w-16 text-left">{away ?? '-'}</span>
-    </div>
   )
 }
