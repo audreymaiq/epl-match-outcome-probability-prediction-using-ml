@@ -1,90 +1,25 @@
 'use client'
 
 import Link from 'next/link'
+import { useMemo, useState } from 'react'
+import { Search, Shield, ArrowUpRight } from 'lucide-react'
 import { useTeams } from '@/lib/hooks'
+import { PageHeading } from '@/components/page-heading'
+import { TeamMark } from '@/components/team-mark'
 import type { Team } from '@/lib/types'
 
-const EPL_COLORS: Record<string, string> = {
-  'Arsenal': '#EF0107',
-  'Chelsea': '#034694',
-  'Liverpool': '#C8102E',
-  'Manchester City': '#6CABDD',
-  'Manchester United': '#DA291C',
-  'Tottenham': '#132257',
-  'Newcastle': '#241F20',
-  'Aston Villa': '#95BFE5',
-  'Brighton': '#0057B8',
-  'West Ham': '#7A263A',
-  'Brentford': '#E30613',
-  'Fulham': '#CC0000',
-  'Crystal Palace': '#1B458F',
-  'Wolves': '#FDB913',
-  'Nottingham Forest': '#DD0000',
-  'Everton': '#003399',
-  'Bournemouth': '#DA291C',
-  'Southampton': '#D71920',
-  'Ipswich': '#3A64A3',
-  'Leicester': '#003090',
-}
-
-function TeamCard({ team }: { team: Team }) {
-  const accentColor = EPL_COLORS[team.name] ?? '#3d195b'
-
-  return (
-    <Link href={`/teams/${team.id}`}>
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-5 hover:bg-white/10 hover:border-white/20 transition-all group cursor-pointer flex flex-col items-center gap-3 text-center">
-        <div
-          className="w-16 h-16 rounded-full flex items-center justify-center text-white font-extrabold text-xl shadow-lg group-hover:scale-105 transition-transform"
-          style={{ backgroundColor: accentColor }}
-        >
-          {team.short_name?.slice(0, 3) ?? team.name.slice(0, 3).toUpperCase()}
-        </div>
-
-        <div>
-          <p className="text-sm font-bold text-white group-hover:text-[#00ff85] transition-colors">
-            {team.name}
-          </p>
-          {team.short_name && (
-            <p className="text-[10px] text-white/30 mt-0.5">{team.short_name}</p>
-          )}
-        </div>
-
-        <span className="text-[10px] text-[#00ff85] opacity-0 group-hover:opacity-100 transition-opacity">
-          View details →
-        </span>
-      </div>
-    </Link>
-  )
-}
-
 export default function TeamsPage() {
-  const { data: teamsPage, isLoading, isError } = useTeams()
-  const teams = teamsPage?.data ?? []
+  const [search, setSearch] = useState('')
+  const { data, isLoading, isError } = useTeams()
+  const teams = data?.data ?? []
+  const totalTeams = data?.pagination.total
+  const filteredTeams = useMemo(() => teams.filter((team: Team) => team.name.toLowerCase().includes(search.trim().toLowerCase())), [search, teams])
 
   return (
-    <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Premier League Teams</h1>
-        {teams.length > 0 && (
-          <span className="text-xs text-white/30">{teams.length} teams</span>
-        )}
-      </div>
-
-      {isLoading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {Array.from({ length: 20 }).map((_, i) => (
-            <div key={i} className="bg-white/5 border border-white/10 rounded-2xl h-36 animate-pulse" />
-          ))}
-        </div>
-      ) : isError ? (
-        <div className="text-center py-16 text-red-400">Failed to load teams. API may be offline.</div>
-      ) : teams.length ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {teams.map((t: Team) => <TeamCard key={t.id} team={t} />)}
-        </div>
-      ) : (
-        <div className="text-center py-16 text-white/30">No teams found.</div>
-      )}
+    <main className="page-frame pb-16 pt-8 sm:pt-12">
+      <PageHeading eyebrow="Premier League" title="Clubs" description="Open a club profile to view recent form, season statistics and fixtures." action={totalTeams != null ? <div className="border-l border-[var(--border)] pl-4 text-right"><p className="font-mono text-lg font-bold text-white">{totalTeams}</p><p className="text-[0.65rem] text-[var(--muted)]">clubs</p></div> : undefined} />
+      <div className="mb-6 max-w-md"><label className="relative block"><span className="sr-only">Search clubs</span><Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--subtle)]" /><input className="field-control pl-10" type="search" placeholder="Find a club" value={search} onChange={(event) => setSearch(event.target.value)} /></label></div>
+      {isLoading ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{Array.from({ length: 12 }, (_, index) => <div key={index} className="surface-quiet h-40 animate-pulse" />)}</div> : isError ? <div role="alert" className="surface-quiet p-8 text-center text-sm text-[var(--danger)]">Club data could not be loaded. Please try again shortly.</div> : filteredTeams.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{filteredTeams.map((team: Team) => <Link key={team.id} href={`/teams/${team.id}`} className="surface-quiet group flex min-h-40 flex-col justify-between overflow-hidden p-4 transition-colors hover:border-white/20 hover:bg-[var(--surface-raised)] sm:p-5"><TeamMark team={team} size="lg" /><div className="mt-5 flex items-end justify-between gap-2"><div className="min-w-0"><p className="truncate text-sm font-bold text-white">{team.name}</p><p className="mt-1 truncate text-[0.68rem] text-[var(--muted)]">{team.stadium_name || team.short_name || 'Premier League club'}</p></div><ArrowUpRight size={15} className="shrink-0 text-[var(--subtle)] transition group-hover:text-[var(--pl-green)]" /></div></Link>)}</div> : <div className="surface-quiet p-12 text-center"><Shield className="mx-auto text-[var(--subtle)]" /><p className="mt-3 font-semibold text-white">No clubs found</p><p className="mt-1 text-sm text-[var(--muted)]">Try a different search.</p></div>}
     </main>
   )
 }
