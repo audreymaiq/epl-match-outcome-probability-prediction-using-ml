@@ -16,7 +16,7 @@ Design:
   - Each entity upserted idempotently (safe to rerun)
   - In-memory cache per loader instance to avoid redundant DB lookups
   - All SQL is raw text (no ORM bloat) - fast and transparent
-  - Per-bundle nested transactions: one bundle failure = rollback that bundle only
+  - Per-bundle transactions: one bundle failure rolls back that bundle
 """
 
 import logging
@@ -73,8 +73,13 @@ class MatchLoader(AbstractLoader):
 
     def load_bundle(self, bundle: ParsedMatchBundle) -> int:
         """Load one bundle atomically. Returns internal match ID."""
-        with self._nested_transaction():
-            return self._load_full_bundle(bundle)
+        try:
+            with self._nested_transaction():
+                return self._load_full_bundle(bundle)
+        except Exception:
+            # IDs created inside a rolled-back savepoint are no longer valid.
+            self._cache.clear()
+            raise
 
     def bulk_load(self, bundles: List[ParsedMatchBundle]) -> Dict[str, Any]:
         """Load multiple bundles, capturing per-bundle errors without aborting the batch."""
@@ -122,6 +127,13 @@ class MatchLoader(AbstractLoader):
         Returns the internal match_id.
         """
         match = bundle.match
+        fixture_team_ids = {match.home_team.external_id, match.away_team.external_id}
+        if len(fixture_team_ids) != 2:
+            raise LoaderError(f"Match {match.external_id} has identical teams")
+        for record in (*bundle.lineups, *bundle.squad_availability,
+                       *bundle.player_stats, *bundle.team_stats):
+            if record.team.external_id not in fixture_team_ids:
+                raise LoaderError(f"Record team does not belong to match {match.external_id}")
 
         # 1. Resolve FK dependencies first (entities that Matches references)
         league_id  = self._upsert_league(match.season.league)
@@ -139,8 +151,11 @@ class MatchLoader(AbstractLoader):
         # 2. Upsert Match (core row)
         match_id = self._upsert_match(match, season_id, home_id, away_id, stadium_id, referee_id)
 
-        # 3. Load child entities (best-effort: errors logged, not raised)
-        self._load_events(bundle.events, match_id, home_id, away_id)
+        # 3. Load child entities in the same transaction as the match.
+        self._load_events(
+            bundle.events, match_id, home_id, away_id,
+            match.home_team.external_id, match.away_team.external_id,
+        )
         self._load_lineups(bundle.lineups, match_id)
         self._load_squad_availability(bundle.squad_availability, match_id)
         self._load_player_stats(bundle.player_stats, match_id)
@@ -281,8 +296,6 @@ class MatchLoader(AbstractLoader):
         internal_id = self._session.execute(text("""
             INSERT INTO "Referees" (name, country, date_of_birth)
             VALUES (:name, :country, :dob)
-            ON CONFLICT (name, country) DO UPDATE SET
-                date_of_birth = COALESCE(EXCLUDED.date_of_birth, "Referees".date_of_birth)
             RETURNING id
         """), {
             "name":    referee.name,
@@ -309,11 +322,6 @@ class MatchLoader(AbstractLoader):
         internal_id = self._session.execute(text("""
             INSERT INTO "Players" (name, position, date_of_birth, nationality, height)
             VALUES (:name, :pos, :dob, :nat, :height)
-            ON CONFLICT (name, date_of_birth) DO UPDATE SET
-                position    = COALESCE(EXCLUDED.position, "Players".position),
-                nationality = COALESCE(EXCLUDED.nationality, "Players".nationality),
-                height      = COALESCE(EXCLUDED.height, "Players".height),
-                updated_at  = NOW()
             RETURNING id
         """), {
             "name":   player.name,
@@ -337,13 +345,17 @@ class MatchLoader(AbstractLoader):
         referee_id: Optional[int],
     ) -> int:
         cache_key = f"match:{match.external_id}"
-        if cached := self._cache.get(cache_key):
-            return cached
-
         if internal_id := get_internal_id(str(match.external_id), "match", self.SOURCE_SYSTEM, self._session):
-            # Still update mutable fields (status, score) in case this is a re-run
+            # A provider may reschedule a fixture or correct its metadata.
             self._session.execute(text("""
                 UPDATE "Matches" SET
+                    season_id             = :sid,
+                    home_team_id          = :hid,
+                    away_team_id          = :aid,
+                    match_datetime        = :dt,
+                    match_week            = :mw,
+                    stadium_id            = COALESCE(:st_id, stadium_id),
+                    referee_id            = COALESCE(:ref_id, referee_id),
                     status                = :status,
                     outcome               = :outcome,
                     home_goals            = :hg,
@@ -354,6 +366,9 @@ class MatchLoader(AbstractLoader):
                     updated_at            = NOW()
                 WHERE id = :id
             """), {
+                "sid": season_id, "hid": home_id, "aid": away_id,
+                "dt": match.match_datetime, "mw": match.match_week,
+                "st_id": stadium_id, "ref_id": referee_id,
                 "status":  match.status.value,
                 "outcome": match.outcome.value if match.outcome else None,
                 "hg": match.home_goals, "ag": match.away_goals,
@@ -382,8 +397,12 @@ class MatchLoader(AbstractLoader):
                 :hthg, :htag,
                 :att
             )
-            ON CONFLICT (season_id, home_team_id, away_team_id, match_datetime)
+            ON CONFLICT (match_datetime, home_team_id, away_team_id)
             DO UPDATE SET
+                season_id            = EXCLUDED.season_id,
+                match_week           = EXCLUDED.match_week,
+                stadium_id           = COALESCE(EXCLUDED.stadium_id, "Matches".stadium_id),
+                referee_id           = COALESCE(EXCLUDED.referee_id, "Matches".referee_id),
                 status               = EXCLUDED.status,
                 outcome              = EXCLUDED.outcome,
                 home_goals           = EXCLUDED.home_goals,
@@ -408,7 +427,7 @@ class MatchLoader(AbstractLoader):
         self._cache[cache_key] = internal_id
         return internal_id
 
-    # ── Child entity loaders (best-effort, errors logged) ─────────────────────
+    # ── Child entity loaders ───────────────────────────────────────────────────
 
     def _load_events(
         self,
@@ -416,6 +435,8 @@ class MatchLoader(AbstractLoader):
         match_id: int,
         home_team_internal_id: int,
         away_team_internal_id: int,
+        home_team_external_id: int,
+        away_team_external_id: int,
     ) -> None:
         if not events:
             return
@@ -430,12 +451,15 @@ class MatchLoader(AbstractLoader):
                 player_id = self._upsert_player(event.player) if event.player else None
                 related_player_id = self._upsert_player(event.related_player) if event.related_player else None
 
-                # Map team → internal ID
+                # Match events must belong to one of this fixture's teams.
                 team_internal_id: Optional[int] = None
                 if event.team:
-                    team_internal_id = get_internal_id(
-                        str(event.team.external_id), "team", self.SOURCE_SYSTEM, self._session
-                    )
+                    if event.team.external_id == home_team_external_id:
+                        team_internal_id = home_team_internal_id
+                    elif event.team.external_id == away_team_external_id:
+                        team_internal_id = away_team_internal_id
+                    else:
+                        raise LoaderError(f"Event team does not belong to match {match_id}")
 
                 self._session.execute(text("""
                     INSERT INTO "MatchEvents" (
@@ -458,6 +482,7 @@ class MatchLoader(AbstractLoader):
                 rows_inserted += 1
             except Exception as exc:
                 logger.warning("Failed to insert event for match %d: %s", match_id, exc)
+                raise
 
         logger.debug("Inserted %d events for match %d.", rows_inserted, match_id)
 
@@ -475,7 +500,7 @@ class MatchLoader(AbstractLoader):
                 player_id = self._upsert_player(lu.player)
                 team_id   = self._upsert_team(lu.team)
                 if not player_id or not team_id:
-                    continue
+                    raise LoaderError(f"Lineup for match {match_id} has no player or team ID")
 
                 self._session.execute(text("""
                     INSERT INTO "Lineups" (
@@ -485,11 +510,12 @@ class MatchLoader(AbstractLoader):
                         :mid, :pid, :tid,
                         :starter, :shirt, :captain, :pos
                     )
-                    ON CONFLICT (match_id, player_id) DO UPDATE SET
+                    ON CONFLICT (match_id, team_id, player_id) DO UPDATE SET
                         is_starter       = EXCLUDED.is_starter,
                         shirt_number     = EXCLUDED.shirt_number,
                         is_captain       = EXCLUDED.is_captain,
-                        position_in_lineup = EXCLUDED.position_in_lineup
+                        position_in_lineup = EXCLUDED.position_in_lineup,
+                        updated_at = NOW()
                 """), {
                     "mid":     match_id,
                     "pid":     player_id,
@@ -502,6 +528,7 @@ class MatchLoader(AbstractLoader):
                 rows_inserted += 1
             except Exception as exc:
                 logger.warning("Failed to insert lineup for match %d: %s", match_id, exc)
+                raise
 
         logger.debug("Inserted %d lineups for match %d.", rows_inserted, match_id)
 
@@ -516,7 +543,7 @@ class MatchLoader(AbstractLoader):
                 player_id = self._upsert_player(rec.player)
                 team_id   = self._upsert_team(rec.team)
                 if not player_id or not team_id:
-                    continue
+                    raise LoaderError(f"Squad record for match {match_id} has no player or team ID")
 
                 self._session.execute(text("""
                     INSERT INTO "SquadAvailability" (
@@ -524,9 +551,10 @@ class MatchLoader(AbstractLoader):
                     ) VALUES (
                         :mid, :pid, :tid, :status, :notes
                     )
-                    ON CONFLICT (match_id, player_id) DO UPDATE SET
+                    ON CONFLICT (match_id, team_id, player_id) DO UPDATE SET
                         status = EXCLUDED.status,
-                        notes  = EXCLUDED.notes
+                        notes  = EXCLUDED.notes,
+                        updated_at = NOW()
                 """), {
                     "mid":    match_id,
                     "pid":    player_id,
@@ -537,6 +565,7 @@ class MatchLoader(AbstractLoader):
                 rows_inserted += 1
             except Exception as exc:
                 logger.warning("Failed to insert squad availability for match %d: %s", match_id, exc)
+                raise
 
         logger.debug("Inserted %d squad availability records for match %d.", rows_inserted, match_id)
 
@@ -551,7 +580,7 @@ class MatchLoader(AbstractLoader):
                 player_id = self._upsert_player(stats.player)
                 team_id   = self._upsert_team(stats.team)
                 if not player_id or not team_id:
-                    continue
+                    raise LoaderError(f"Player stats for match {match_id} have no player or team ID")
 
                 self._session.execute(text("""
                     INSERT INTO "MatchPlayerStats" (
@@ -574,6 +603,8 @@ class MatchLoader(AbstractLoader):
                         :sub_in, :sub_out
                     )
                     ON CONFLICT (match_id, player_id) DO UPDATE SET
+                        team_id          = EXCLUDED.team_id,
+                        is_starter       = EXCLUDED.is_starter,
                         minutes_played   = EXCLUDED.minutes_played,
                         goals            = EXCLUDED.goals,
                         assists          = EXCLUDED.assists,
@@ -589,6 +620,8 @@ class MatchLoader(AbstractLoader):
                         yellow_cards     = EXCLUDED.yellow_cards,
                         red_cards        = EXCLUDED.red_cards,
                         saves            = EXCLUDED.saves,
+                        substituted_in_minute  = EXCLUDED.substituted_in_minute,
+                        substituted_out_minute = EXCLUDED.substituted_out_minute,
                         updated_at       = NOW()
                 """), {
                     "mid": match_id, "pid": player_id, "tid": team_id,
@@ -607,6 +640,7 @@ class MatchLoader(AbstractLoader):
                 rows_inserted += 1
             except Exception as exc:
                 logger.warning("Failed to insert player stats for match %d: %s", match_id, exc)
+                raise
 
         logger.debug("Inserted %d player stats rows for match %d.", rows_inserted, match_id)
 
@@ -645,6 +679,7 @@ class MatchLoader(AbstractLoader):
                         :yc, :rc, :saves
                     )
                     ON CONFLICT (match_id, team_id) DO UPDATE SET
+                        location              = EXCLUDED.location,
                         possession_percentage = EXCLUDED.possession_percentage,
                         total_shots           = EXCLUDED.total_shots,
                         shots_on_target       = EXCLUDED.shots_on_target,
@@ -659,7 +694,7 @@ class MatchLoader(AbstractLoader):
                         updated_at            = NOW()
                 """), {
                     "mid": match_id, "tid": team_id, "loc": location,
-                    "poss": float(stats.possession_percentage) if stats.possession_percentage else None,
+                    "poss": float(stats.possession_percentage) if stats.possession_percentage is not None else None,
                     "ts": stats.total_shots, "sot": stats.shots_on_target,
                     "soft": stats.shots_off_target, "bshot": stats.blocked_shots,
                     "fc": stats.fouls_committed, "corners": stats.corners,
@@ -669,6 +704,7 @@ class MatchLoader(AbstractLoader):
                 rows_inserted += 1
             except Exception as exc:
                 logger.warning("Failed to insert team stats for match %d: %s", match_id, exc)
+                raise
 
         logger.debug("Inserted %d team stats rows for match %d.", rows_inserted, match_id)
 
