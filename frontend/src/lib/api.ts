@@ -17,7 +17,7 @@ import type {
 } from './types'
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || '',
   timeout: 10000,
 })
 
@@ -71,6 +71,6 @@ export const getModelInfo = () =>
   api.get<ModelInfo>('/api/v1/model/info')
 
 export const getModelPerformance = () =>
-  api.get<ModelPerformance[]>('/api/v1/model/performance')
+  api.get<ModelPerformance>('/api/v1/model/performance')
 
 export default api
