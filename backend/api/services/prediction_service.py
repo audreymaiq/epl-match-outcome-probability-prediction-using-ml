@@ -261,6 +261,8 @@ class PredictionService:
                 home_team_id=request.home_team_id,
                 away_team_id=request.away_team_id,
                 match_datetime=request.match_datetime,
+                season_name=request.season_name,
+                match_week=request.match_week,
             )
 
         # Select only columns the model was trained on
