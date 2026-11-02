@@ -1,171 +1,52 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
-import { useMatches } from '@/lib/hooks'
-import { ProbabilityBars } from '@/components/probability-bars'
-import type { MatchListItem, MatchesParams } from '@/lib/types'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { CalendarDays, Search, SlidersHorizontal } from 'lucide-react'
+import { useMatches, useTeams } from '@/lib/hooks'
+import { PageHeading } from '@/components/page-heading'
+import { MatchCard } from '@/components/match-card'
+import type { MatchesParams, Team } from '@/lib/types'
 
-const SEASONS = [
-  { value: '2024/25', label: '2024/25' },
-  { value: '2023/24', label: '2023/24' },
-  { value: '2022/23', label: '2022/23' },
-]
-
-const STATUS_OPTIONS = [
-  { value: '', label: 'All Matches' },
-  { value: 'SCHEDULED', label: 'Upcoming' },
-  { value: 'FINISHED', label: 'Finished' },
-]
-
-function StatusBadge({ status }: { status: string }) {
-  const cfg: Record<string, string> = {
-    SCHEDULED: 'bg-[#00ff85]/20 text-[#00ff85] border-[#00ff85]/30',
-    LIVE: 'bg-red-500/20 text-red-400 border-red-500/30',
-    FINISHED: 'bg-white/10 text-white/40 border-white/10',
-    POSTPONED: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  }
-  return (
-    <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full border ${cfg[status] ?? 'bg-white/10 text-white/40'}`}>
-      {status}
-    </span>
-  )
-}
-
-function MatchRow({ match }: { match: MatchListItem }) {
-  const isFinished = match.status === 'FINISHED'
-  return (
-    <Link href={`/matches/${match.id}`}>
-      <div className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition-all">
-        <div className="flex items-center justify-between gap-4">
-          {/* GW + Status */}
-          <div className="flex flex-col items-center gap-1 min-w-[44px]">
-            <span className="text-[10px] text-white/30 font-medium">GW{match.match_week}</span>
-            <StatusBadge status={match.status} />
-          </div>
-
-          {/* Teams */}
-          <div className="flex-1 flex items-center gap-3 min-w-0">
-            <span className="text-sm font-semibold text-white text-right flex-1 truncate">
-              {match.home_team.name}
-            </span>
-            <div className="text-center min-w-[52px] shrink-0">
-              {isFinished ? (
-                <span className="text-base font-bold text-white">
-                  {match.home_goals} – {match.away_goals}
-                </span>
-              ) : (
-                <span className="text-xs text-white/30">vs</span>
-              )}
-            </div>
-            <span className="text-sm font-semibold text-white text-left flex-1 truncate">
-              {match.away_team.name}
-            </span>
-          </div>
-
-          {/* Date */}
-          <div className="text-[10px] text-white/30 text-right min-w-[72px] hidden md:block">
-            {new Date(match.match_datetime).toLocaleDateString('en-GB', {
-              day: 'numeric', month: 'short',
-            })}
-          </div>
-        </div>
-      </div>
-    </Link>
-  )
-}
-
-export default function MatchesPage() {
-  const [statusFilter, setStatusFilter] = useState('')
-  const [season, setSeason] = useState<string | undefined>(undefined)
+function MatchesContent() {
+  const query = useSearchParams()
+  const initialTeam = query.get('team_id') || ''
+  const [status, setStatus] = useState('')
+  const [teamId, setTeamId] = useState(initialTeam)
+  const [season, setSeason] = useState('')
   const [page, setPage] = useState(1)
-
-  const params: MatchesParams = {
-    status: statusFilter || undefined,
-    season,
-    page,
-    page_size: 20,
-  }
-
+  const { data: teamsResponse } = useTeams()
+  const teams = teamsResponse?.data ?? []
+  const params: MatchesParams = useMemo(() => ({ status: status || undefined, season: season || undefined, team_id: teamId ? Number(teamId) : undefined, page, page_size: 20 }), [page, season, status, teamId])
   const { data, isLoading, isError } = useMatches(params)
-
   const matches = data?.data ?? []
   const pagination = data?.pagination
   const totalPages = pagination?.total_pages ?? 1
 
-  const selectCls = "bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#00ff85] transition-colors"
+  useEffect(() => {
+    setTeamId(query.get('team_id') || '')
+    setPage(1)
+  }, [query])
+
+  function update<T>(setter: (value: T) => void, value: T) { setter(value); setPage(1) }
 
   return (
-    <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Matches</h1>
-        {pagination && (
-          <span className="text-xs text-white/30">{pagination.total.toLocaleString()} total</span>
-        )}
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <select
-          className={selectCls}
-          value={statusFilter}
-          onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
-        >
-          {STATUS_OPTIONS.map(o => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-        <select
-          className={selectCls}
-          value={season ?? ''}
-          onChange={e => { setSeason(e.target.value || undefined); setPage(1) }}
-        >
-          <option value="">All Seasons</option>
-          {SEASONS.map(s => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Match list */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i} className="bg-white/5 border border-white/10 rounded-xl h-16 animate-pulse" />
-          ))}
+    <main className="page-frame pb-16 pt-8 sm:pt-12">
+      <PageHeading eyebrow="Premier League" title="Fixtures" description="Browse matches by club, season or status." action={pagination ? <div className="border-l border-[var(--border)] pl-4 text-right"><p className="font-mono text-lg font-bold text-white">{pagination.total.toLocaleString()}</p><p className="text-[0.65rem] text-[var(--muted)]">matches found</p></div> : undefined} />
+      <section className="surface-quiet mb-6 p-4 sm:p-5" aria-label="Match filters">
+        <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--muted)]"><SlidersHorizontal size={14} /> Refine fixtures</div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="relative"><span className="sr-only">Club</span><Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--subtle)]" /><select className="field-control pl-9" value={teamId} onChange={(event) => update(setTeamId, event.target.value)}><option value="">All clubs</option>{teams.map((team: Team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+          <label><span className="sr-only">Status</span><select className="field-control" value={status} onChange={(event) => update(setStatus, event.target.value)}><option value="">All match statuses</option><option value="SCHEDULED">Upcoming</option><option value="FINISHED">Finished</option><option value="POSTPONED">Postponed</option></select></label>
+          <label><span className="sr-only">Season</span><input className="field-control" inputMode="text" placeholder="Season, e.g. 2024/25" value={season} onChange={(event) => update(setSeason, event.target.value)} /></label>
         </div>
-      ) : isError ? (
-        <div className="text-center py-16 text-red-400">Failed to load matches. API may be offline.</div>
-      ) : matches.length > 0 ? (
-        <div className="space-y-2">
-          {matches.map((m: MatchListItem) => <MatchRow key={m.id} match={m} />)}
-        </div>
-      ) : (
-        <div className="text-center py-16 text-white/30">No matches found.</div>
-      )}
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-3 pt-4">
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white disabled:opacity-30 hover:bg-white/10 transition-colors"
-          >
-            ← Prev
-          </button>
-          <span className="text-sm text-white/40">
-            Page {page} of {totalPages}
-          </span>
-          <button
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white disabled:opacity-30 hover:bg-white/10 transition-colors"
-          >
-            Next →
-          </button>
-        </div>
-      )}
+      </section>
+      {isLoading ? <div className="grid gap-3 md:grid-cols-2">{Array.from({ length: 8 }, (_, index) => <div key={index} className="surface-quiet h-36 animate-pulse" />)}</div> : isError ? <div role="alert" className="surface-quiet p-8 text-center"><p className="font-semibold text-white">Fixtures could not be loaded</p><p className="mt-1 text-sm text-[var(--muted)]">The match service may be temporarily unavailable. Try again in a moment.</p></div> : matches.length ? <div className="grid gap-3 md:grid-cols-2">{matches.map((match) => <MatchCard key={match.id} match={match} />)}</div> : <div className="surface-quiet p-12 text-center"><CalendarDays className="mx-auto text-[var(--subtle)]" size={22} /><p className="mt-3 font-semibold text-white">No matches match these filters</p><p className="mt-1 text-sm text-[var(--muted)]">Clear one or more filters to see more fixtures.</p></div>}
+      {totalPages > 1 && <nav className="mt-8 flex items-center justify-center gap-3" aria-label="Match pages"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button><span className="px-2 text-xs tabular-nums text-[var(--muted)]">Page {page} of {totalPages}</span><button className="button-secondary" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Next</button></nav>}
     </main>
   )
+}
+
+export default function MatchesPage() {
+  return <Suspense fallback={<main className="page-frame py-12"><div className="surface-quiet h-48 animate-pulse" /></main>}><MatchesContent /></Suspense>
 }
