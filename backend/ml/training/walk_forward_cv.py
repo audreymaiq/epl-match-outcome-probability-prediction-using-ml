@@ -15,7 +15,7 @@ SCHEME:
 EPL-SPECIFIC DECISIONS:
   - Minimum training seasons: 3 (need enough H2H, form history)
   - Test window: 1 full season (~380 matches / 38 rounds × 20 teams / 2)
-  - Skip first min_match_week rounds in test (insufficient rolling history)
+  - Evaluate every round; prior-season history and explicit fallbacks support early-season fixtures
   - Evaluate per season AND per fold
 
 OUTPUT METRICS (per fold and aggregate):
@@ -83,24 +83,38 @@ class CVResult:
     folds: List[FoldResult] = field(default_factory=list)
 
     @property
-    def mean_accuracy(self) -> float:
-        return float(np.mean([f.accuracy for f in self.folds]))
+    def mean_accuracy(self) -> Optional[float]:
+        return float(np.mean([f.accuracy for f in self.folds])) if self.folds else None
 
     @property
-    def std_accuracy(self) -> float:
-        return float(np.std([f.accuracy for f in self.folds]))
+    def std_accuracy(self) -> Optional[float]:
+        return float(np.std([f.accuracy for f in self.folds])) if self.folds else None
 
     @property
-    def mean_log_loss(self) -> float:
-        return float(np.mean([f.log_loss for f in self.folds]))
+    def mean_log_loss(self) -> Optional[float]:
+        return float(np.mean([f.log_loss for f in self.folds])) if self.folds else None
 
     @property
-    def mean_brier(self) -> float:
-        return float(np.mean([f.brier_score for f in self.folds]))
+    def mean_brier(self) -> Optional[float]:
+        return float(np.mean([f.brier_score for f in self.folds])) if self.folds else None
 
     @property
     def summary(self) -> Dict[str, Any]:
         classes = ["H", "D", "A"]
+        if not self.folds:
+            summary: Dict[str, Any] = {
+                "n_folds": 0,
+                "mean_accuracy": None,
+                "std_accuracy": None,
+                "mean_log_loss": None,
+                "mean_brier": None,
+            }
+            for cls in classes:
+                summary[f"precision_{cls}"] = None
+                summary[f"recall_{cls}"] = None
+                summary[f"f1_{cls}"] = None
+            return summary
+
         per_class = {}
         for cls in classes:
             per_class[f"precision_{cls}"] = float(np.mean([f.precision_per_class.get(cls, 0) for f in self.folds]))
@@ -133,15 +147,15 @@ class WalkForwardCV:
         n_test_seasons: Number of seasons to hold out as test in each fold.
                         Default 1 = predict next season, train on all prior.
         min_train_seasons: Minimum seasons in training set before we trust results.
-        gap_rounds: Skip the first N rounds of each test season
-                    (rolling stats are unstable early in the season).
+        gap_rounds: Optional number of opening rounds to exclude from each
+                    test season. Defaults to zero so evaluation covers the full season.
     """
 
     def __init__(
         self,
         n_test_seasons: int = 1,
         min_train_seasons: int = 2,
-        gap_rounds: int = 5,
+        gap_rounds: int = 0,
     ):
         self._n_test = n_test_seasons
         self._min_train = min_train_seasons
@@ -155,7 +169,7 @@ class WalkForwardCV:
     ) -> List[Tuple[np.ndarray, np.ndarray]]:
         """
         Generate (train_indices, test_indices) for each fold.
-        Sorted chronologically. Gaps applied to exclude early-season test rows.
+        Sorted chronologically. Optional gaps exclude opening test rounds.
 
         Args:
             df:          Full DataFrame with all matches (sorted by date).
@@ -300,6 +314,7 @@ class WalkForwardCV:
                 fold_result.precision_per_class.get("D", 0),
             )
 
+        cv_result.n_folds = len(cv_result.folds)
         logger.info("CV Summary: %s", cv_result.summary)
         return cv_result
 
