@@ -1,0 +1,76 @@
+# syntax=docker/dockerfile:1.7
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile.api - FastAPI Prediction API
+#
+# Multi-stage build:
+#   Stage 1 (builder): install deps + compile Python files
+#   Stage 2 (runtime): lean image, no build tools
+#
+# Security:
+#   - Non-root user (appuser)
+#   - No package caches in final image
+#   - Explicit COPY of only needed files
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: Builder ──────────────────────────────────────────────────────────
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install system build deps (needed for psycopg2, catboost compilation)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (layer caching - rebuild only when reqs change)
+COPY requirements.txt .
+
+# Install into a prefix dir (clean copy to runtime stage)
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+LABEL maintainer="EPL Prediction System"
+LABEL description="FastAPI prediction API - Premier League match outcome probabilities"
+
+# Runtime-only system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /app
+
+# Copy application code
+COPY --chown=appuser:appuser . .
+
+# Create directories needed at runtime
+RUN mkdir -p /app/models /app/logs && chown -R appuser:appuser /app
+
+USER appuser
+
+# Expose API port
+EXPOSE 8000
+
+# Health check (Docker HEALTHCHECK)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Production: 2 workers, 30s timeout (model load can be slow)
+CMD ["uvicorn", "api.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "2", \
+     "--timeout-keep-alive", "30", \
+     "--log-level", "info", \
+     "--access-log"]
+
