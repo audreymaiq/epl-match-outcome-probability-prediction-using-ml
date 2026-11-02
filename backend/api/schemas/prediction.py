@@ -2,6 +2,7 @@
 """Prediction request/response schemas."""
 
 from __future__ import annotations
+from datetime import datetime
 from typing import Dict, Optional, List
 from pydantic import BaseModel, Field, model_validator
 
@@ -11,7 +12,7 @@ class PredictRequest(BaseModel):
     Input for a prediction request.
 
     Provide EITHER match_id (for a known DB match) OR
-    home_team_id + away_team_id + match_datetime for a custom fixture.
+    home_team_id + away_team_id + match_datetime + season_name + match_week for a custom fixture.
     """
     match_id: Optional[int] = Field(
         default=None,
@@ -30,6 +31,17 @@ class PredictRequest(BaseModel):
         description="ISO 8601 datetime for the fixture. Required if match_id is not provided.",
         examples=["2024-08-17T15:00:00Z"],
     )
+    season_name: Optional[str] = Field(
+        default=None,
+        description="Canonical season name stored in the database, such as 2024/2025.",
+        examples=["2024/2025"],
+    )
+    match_week: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=38,
+        description="Premier League matchweek. Required for a custom fixture.",
+    )
     include_feature_breakdown: bool = Field(
         default=False,
         description="If true, includes the raw feature vector in the response (for debugging).",
@@ -44,6 +56,16 @@ class PredictRequest(BaseModel):
                 )
             if self.home_team_id == self.away_team_id:
                 raise ValueError("home_team_id and away_team_id must be different.")
+            if not self.match_datetime:
+                raise ValueError("match_datetime is required for a custom fixture.")
+            try:
+                datetime.fromisoformat(self.match_datetime.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("match_datetime must be a valid ISO 8601 datetime.") from exc
+            if not self.season_name:
+                raise ValueError("season_name is required for a custom fixture.")
+            if self.match_week is None:
+                raise ValueError("match_week is required for a custom fixture.")
         return self
 
 
