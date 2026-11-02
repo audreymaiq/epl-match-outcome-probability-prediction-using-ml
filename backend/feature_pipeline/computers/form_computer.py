@@ -17,10 +17,9 @@ Time-safe: all aggregation is BEFORE match_datetime - no leakage.
 
 ARCHITECTURE:
   This computer runs in the feature_pipeline (batch ETL layer).
-  However, FeatureExtractor ALSO computes live form directly from Matches
-  at inference time (API layer). Both must produce identical results.
-  The batch table is used for training speed; live queries are used
-  for real-time predictions on unseen fixtures.
+  FeatureExtractor computes model features directly from Matches for both
+  training and inference. This table is a separate unweighted summary for
+  reporting and must not be substituted for the model's weighted features.
 """
 
 import logging
@@ -60,11 +59,9 @@ class FormComputer(AbstractFeatureComputer):
             f" for season {season_name}" if season_name else " (all seasons)",
         )
 
-        season_filter = ""
         anchor_season_filter = ""
         params: dict = {}
         if season_name:
-            season_filter = "AND s.name = :season_name"
             anchor_season_filter = "AND anchor_s.name = :season_name"
             params["season_name"] = season_name
 
@@ -92,10 +89,8 @@ class FormComputer(AbstractFeatureComputer):
                 CASE WHEN m.outcome = 'A' THEN 1 ELSE 0 END AS is_loss,
                 CASE WHEN m.away_goals = 0 THEN 1 ELSE 0 END AS clean_sheet
             FROM "Matches" m
-            JOIN "Seasons" s ON s.id = m.season_id
             WHERE m.status = 'FINISHED'
               AND m.home_goals IS NOT NULL
-              {season_filter}
 
             UNION ALL
 
@@ -116,10 +111,8 @@ class FormComputer(AbstractFeatureComputer):
                 CASE WHEN m.outcome = 'H' THEN 1 ELSE 0 END,
                 CASE WHEN m.home_goals = 0 THEN 1 ELSE 0 END
             FROM "Matches" m
-            JOIN "Seasons" s ON s.id = m.season_id
             WHERE m.status = 'FINISHED'
               AND m.away_goals IS NOT NULL
-              {season_filter}
         ),
         -- All anchors: every (match_id, team_id) that we need form stats for
         anchors AS (
@@ -152,7 +145,7 @@ class FormComputer(AbstractFeatureComputer):
                 mr.clean_sheet,
                 ROW_NUMBER() OVER (
                     PARTITION BY a.match_id, a.team_id
-                    ORDER BY mr.match_datetime DESC
+                    ORDER BY mr.match_datetime DESC, mr.match_id DESC
                 ) AS rn
             FROM anchors a
             JOIN match_results mr ON
