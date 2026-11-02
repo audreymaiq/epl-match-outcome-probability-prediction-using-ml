@@ -1,0 +1,46 @@
+{
+  "__inputs": [{ "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" }],
+  "title": "EPL API Health",
+  "uid": "epl-api-health",
+  "tags": ["epl", "api"],
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Request Rate (req/s)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "rate(http_requests_total{job=\"epl-api\"}[1m])", "legendFormat": "req/s" }]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Error Rate (%)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "100 * rate(http_requests_total{job=\"epl-api\",status=~\"5..\"}[1m]) / rate(http_requests_total{job=\"epl-api\"}[1m])", "legendFormat": "error %" }]
+    },
+    {
+      "id": 3, "type": "stat", "title": "P99 Latency (ms)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"epl-api\"}[1m])) * 1000", "legendFormat": "p99 ms" }]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Request Rate Over Time",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "rate(http_requests_total{job=\"epl-api\"}[1m])", "legendFormat": "Total" },
+        { "expr": "rate(http_requests_total{job=\"epl-api\",status=~\"2..\"}[1m])", "legendFormat": "2xx" },
+        { "expr": "rate(http_requests_total{job=\"epl-api\",status=~\"4..\"}[1m])", "legendFormat": "4xx" },
+        { "expr": "rate(http_requests_total{job=\"epl-api\",status=~\"5..\"}[1m])", "legendFormat": "5xx" }
+      ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Request Latency Percentiles",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"epl-api\"}[5m])) * 1000", "legendFormat": "p50 ms" },
+        { "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"epl-api\"}[5m])) * 1000", "legendFormat": "p95 ms" },
+        { "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"epl-api\"}[5m])) * 1000", "legendFormat": "p99 ms" }
+      ]
+    }
+  ]
+}
+
