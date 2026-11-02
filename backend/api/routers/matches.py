@@ -21,13 +21,14 @@ router = APIRouter(prefix="/matches", tags=["Matches"])
 def list_matches(
     season: Optional[str] = Query(None, description='e.g. "2023/24"'),
     status: Optional[str] = Query(None, description="FINISHED | SCHEDULED | POSTPONED"),
+    team_id: Optional[int] = Query(None, ge=1, description="Only matches involving this team"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
     svc = MatchService(db)
     items, total = svc.list_matches(
-        season_name=season, status=status, page=page, page_size=page_size
+        season_name=season, status=status, team_id=team_id, page=page, page_size=page_size
     )
     total_pages = max(1, -(-total // page_size))  # ceiling division
     return PagedResponse(
