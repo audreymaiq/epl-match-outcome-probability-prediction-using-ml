@@ -1,4 +1,3 @@
-import { cn } from '@/lib/utils'
 import type { ProbabilityBreakdown } from '@/lib/types'
 
 interface ProbabilityBarsProps {
@@ -9,86 +8,28 @@ interface ProbabilityBarsProps {
   compact?: boolean
 }
 
-export function ProbabilityBars({
-  probabilities,
-  predicted_outcome,
-  homeTeam = 'Home',
-  awayTeam = 'Away',
-  compact = false,
-}: ProbabilityBarsProps) {
-  const homePct = Math.round(probabilities.home_win * 100)
-  const drawPct = Math.round(probabilities.draw * 100)
-  const awayPct = Math.round(probabilities.away_win * 100)
-
+export function ProbabilityBars({ probabilities, predicted_outcome, homeTeam = 'Home', awayTeam = 'Away', compact = false }: ProbabilityBarsProps) {
   const bars = [
-    {
-      key: 'H',
-      label: compact ? 'H' : homeTeam,
-      sublabel: compact ? undefined : 'Home Win',
-      pct: homePct,
-      color: 'bg-green-500',
-      textColor: 'text-green-700',
-      trackColor: 'bg-green-100',
-    },
-    {
-      key: 'D',
-      label: 'Draw',
-      sublabel: compact ? undefined : 'Draw',
-      pct: drawPct,
-      color: 'bg-yellow-400',
-      textColor: 'text-yellow-700',
-      trackColor: 'bg-yellow-100',
-    },
-    {
-      key: 'A',
-      label: compact ? 'A' : awayTeam,
-      sublabel: compact ? undefined : 'Away Win',
-      pct: awayPct,
-      color: 'bg-blue-500',
-      textColor: 'text-blue-700',
-      trackColor: 'bg-blue-100',
-    },
+    { key: 'H', label: compact ? 'H' : homeTeam, title: 'Home win', value: probabilities.home_win, color: '#8bf0b2' },
+    { key: 'D', label: compact ? 'D' : 'Draw', title: 'Draw', value: probabilities.draw, color: '#d2a7ff' },
+    { key: 'A', label: compact ? 'A' : awayTeam, title: 'Away win', value: probabilities.away_win, color: '#82b5ff' },
   ]
 
   return (
-    <div className={cn('space-y-2', compact ? 'gap-1.5' : 'gap-2')}>
-      {bars.map(({ key, label, sublabel, pct, color, textColor, trackColor }) => {
-        const isPredicted = predicted_outcome === key
+    <div className={compact ? 'space-y-2' : 'space-y-4'}>
+      {bars.map(({ key, label, title, value, color }) => {
+        const percent = Math.max(0, Math.min(100, value * 100))
+        const predicted = predicted_outcome === key
         return (
-          <div key={key} className="flex items-center gap-2">
-            {/* Label */}
-            <div className={cn('text-xs font-medium truncate', compact ? 'w-6' : 'w-24', textColor)}>
-              {compact ? (
-                <span className="font-bold">{label}</span>
-              ) : (
-                <div>
-                  <div className="font-semibold truncate">{label}</div>
-                  {sublabel && label !== sublabel && (
-                    <div className="text-gray-400 text-[10px]">{sublabel}</div>
-                  )}
-                </div>
-              )}
+          <div key={key} className="grid grid-cols-[minmax(4.5rem,1fr)_3fr_auto] items-center gap-3">
+            <div className="min-w-0">
+              <p className={`truncate font-semibold ${compact ? 'text-[0.68rem]' : 'text-sm'} ${predicted ? 'text-white' : 'text-[var(--muted)]'}`}>{label}</p>
+              {!compact && <p className="mt-0.5 text-[0.62rem] text-[var(--subtle)]">{title}</p>}
             </div>
-
-            {/* Bar track */}
-            <div className={cn('flex-1 h-5 rounded-full overflow-hidden', trackColor)}>
-              <div
-                className={cn('h-full rounded-full transition-all duration-700', color, isPredicted && 'opacity-100')}
-                style={{ width: `${pct}%`, opacity: isPredicted ? 1 : 0.65 }}
-              />
+            <div className="h-2 overflow-hidden rounded-full bg-white/[0.08]" role="meter" aria-label={`${label} ${title} probability`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)}>
+              <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${percent}%`, backgroundColor: color, opacity: predicted ? 1 : 0.58 }} />
             </div>
-
-            {/* Percent + predicted indicator */}
-            <div className="flex items-center gap-1 min-w-[42px]">
-              <span className={cn('text-xs font-bold', textColor)}>{pct}%</span>
-              {isPredicted && (
-                <span
-                  className="w-1.5 h-1.5 rounded-full inline-block"
-                  style={{ backgroundColor: 'var(--pl-green)' }}
-                  title="Predicted outcome"
-                />
-              )}
-            </div>
+            <span className={`w-10 text-right font-mono text-xs font-bold tabular-nums ${predicted ? 'text-[var(--pl-green)]' : 'text-[var(--muted)]'}`}>{Math.round(percent)}%</span>
           </div>
         )
       })}
