@@ -47,7 +47,7 @@ class DatabaseSettings(BaseSettings):
         host_enc = urllib.parse.quote(self.host, safe="")
         db_enc = urllib.parse.quote(self.dbname, safe="")
         
-        return f"postgresql://{user_enc}:{pwd_enc}@{host_enc}:{self.port}/{db_enc}"
+        return f"postgresql+psycopg2://{user_enc}:{pwd_enc}@{host_enc}:{self.port}/{db_enc}"
 
     @property
     def is_configured(self) -> bool:
