@@ -74,6 +74,7 @@ class EloBuilder:
 
         # Team name cache
         self._team_names: Dict[int, str] = {}
+        self._build_complete = False
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -82,14 +83,20 @@ class EloBuilder:
         Load all finished matches chronologically and compute ELO timeline.
         Returns number of match-team records computed.
         """
+        self._build_complete = False
         matches = self._load_all_matches()
         logger.info("Building ELO from %d historical matches...", len(matches))
 
+        # Allow a builder instance to be reused without carrying ratings from a
+        # previous build into the newly loaded match history.
+        self._ratings = defaultdict(lambda: self._config.initial_elo)
+        self._team_last_season.clear()
         self._team_names = self._load_team_names()
         self._records = []
 
         for match in matches:
             self._process_match(match)
+        self._build_complete = True
 
         logger.info(
             "ELO build complete: %d records for %d teams.",
@@ -104,8 +111,15 @@ class EloBuilder:
         Safe to call multiple times (idempotent via ON CONFLICT DO UPDATE).
         Returns number of rows upserted.
         """
+        if not self._build_complete:
+            logger.warning("ELO history is not ready to save. Call build_from_db() first.")
+            return 0
+
+        # This is a full-history rebuild. Remove rows for matches that no longer
+        # exist in the source data so feature lookups cannot use stale ratings.
+        self._db.execute(text('DELETE FROM "EloRatings"'))
         if not self._records:
-            logger.warning("No ELO records to save. Call build_from_db() first.")
+            logger.info("EloRatings cleared: no finished matches are available.")
             return 0
 
         upserted = 0
@@ -220,12 +234,8 @@ class EloBuilder:
         self._ratings[home_id] = new_home_elo
         self._ratings[away_id] = new_away_elo
 
-        # 5. Compute effective K-factor (for record)
-        k_effective = abs(new_home_elo - home_elo_before) / max(
-            abs(1.0 if home_goals > away_goals else 0.5 if home_goals == away_goals else 0.0
-                - self._calc.expected_score(home_elo_before + self._calc._cfg.home_advantage, away_elo_before)),
-            1e-6
-        )
+        # 5. Persist the actual adaptive K-factor used by EloCalculator.
+        k_factor = self._calc.k_factor(week, is_top6)
 
         # 6. Append records
         self._records.append(EloRecord(
@@ -234,7 +244,7 @@ class EloBuilder:
             match_date=match_date,
             elo_before=home_elo_before,
             elo_after=round(new_home_elo, 2),
-            k_factor=round(min(k_effective, self._calc._cfg.k_max), 2),
+            k_factor=round(k_factor, 2),
             season=season_name,
         ))
         self._records.append(EloRecord(
@@ -243,7 +253,7 @@ class EloBuilder:
             match_date=match_date,
             elo_before=away_elo_before,
             elo_after=round(new_away_elo, 2),
-            k_factor=round(min(k_effective, self._calc._cfg.k_max), 2),
+            k_factor=round(k_factor, 2),
             season=season_name,
         ))
 
