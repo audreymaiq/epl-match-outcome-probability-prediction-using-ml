@@ -1,16 +1,16 @@
 # providers/api_football/provider.py
 """
-API-Football Data Provider - Skeleton Implementation.
+API-Football Data Provider - implementation template, not active.
 
 This file demonstrates the Open/Closed principle:
   - The orchestrator, loader, and feature pipeline are UNCHANGED
   - Only this file needs to be implemented to add a new data source
-  - Self-registers into ProviderRegistry on import
+  - Register only after all extraction and transformation methods work
 
 HOW TO ACTIVATE:
   1. Implement each NotImplementedError method below
   2. Set PROVIDER=api_football in .env
-  3. Restart the pipeline
+  3. Register the provider and transformer, then restart the pipeline
 
 API-Football docs: https://www.api-football.com/documentation-v3
 """
@@ -57,6 +57,13 @@ class ApiFootballProvider(AbstractDataProvider):
     @property
     def name(self) -> str:
         return PROVIDER_NAME
+
+    @property
+    def tournament_id(self) -> int:
+        return 39
+
+    def list_seasons(self) -> List[tuple[str, int]]:
+        raise NotImplementedError("Map EPL season names to API-Football season years.")
 
     def health_check(self) -> bool:
         """Ping API-Football status endpoint."""
@@ -119,11 +126,5 @@ class ApiFootballTransformerAdapter(AbstractDataTransformer):
         )
 
 
-# ── Self-registration ─────────────────────────────────────────────────────────
-
-ProviderRegistry.register(
-    name=PROVIDER_NAME,
-    provider_class=ApiFootballProvider,
-    transformer_class=ApiFootballTransformerAdapter,
-)
-logger.debug("API-Football provider registered (skeleton - NotImplementedError).")
+# Register this pair only after its contract tests pass:
+# ProviderRegistry.register(PROVIDER_NAME, ApiFootballProvider, ApiFootballTransformerAdapter)
