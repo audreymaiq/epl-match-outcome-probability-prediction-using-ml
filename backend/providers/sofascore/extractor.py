@@ -365,6 +365,10 @@ class SofaScoreExtractor:
         referer = self._build_referer(match_id=match_id)
         return self._execute_with_retry(url, referer=referer, breaker=breaker)
 
+    def fetch_seasons(self, tournament_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
+        url = self._build_url(SofaScoreEndpoints.TOURNAMENT_SEASONS, tournament_id=tournament_id)
+        return self._execute_with_retry(url, referer=self._build_referer(), breaker=breaker)
+
     def fetch_lineups(self, match_id: int, breaker: Optional[CircuitBreaker] = None) -> Optional[Dict]:
         url = self._build_url(SofaScoreEndpoints.MATCH_LINEUPS, match_id=match_id)
         referer = self._build_referer(match_id=match_id)
@@ -389,7 +393,6 @@ class SofaScoreExtractor:
         all_items = []
         page = 0
         while True:
-            page += 1
             url = self._build_url(endpoint, page=page, **kwargs)
             referer = self._build_referer(**kwargs)
             response_data = self._execute_with_retry(url, referer=referer, breaker=breaker)
@@ -400,6 +403,7 @@ class SofaScoreExtractor:
             all_items.extend(items)
             if not response_data.get('hasNextPage', False):
                 break
+            page += 1
         return all_items, len(all_items) > 0
 
     def close(self):
