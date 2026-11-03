@@ -6,10 +6,8 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
-
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Build the Next.js application
@@ -21,12 +19,10 @@ ARG API_INTERNAL_URL=http://localhost:8000
 ENV API_INTERNAL_URL=$API_INTERNAL_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
-
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN pnpm run build
+RUN npm run build
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 3: Production runner (minimal image)
@@ -40,8 +36,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 nextjs
-
-COPY --from=builder /app/public ./public
 
 # Leverage Next.js standalone output (must set output: 'standalone' in next.config)
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
