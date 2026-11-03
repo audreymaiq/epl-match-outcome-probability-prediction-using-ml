@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { CalendarDays, Search, SlidersHorizontal } from 'lucide-react'
 import { useMatches, useTeams } from '@/lib/hooks'
@@ -8,9 +8,7 @@ import { PageHeading } from '@/components/page-heading'
 import { MatchCard } from '@/components/match-card'
 import type { MatchesParams, Team } from '@/lib/types'
 
-function MatchesContent() {
-  const query = useSearchParams()
-  const initialTeam = query.get('team_id') || ''
+function MatchesView({ initialTeam }: { initialTeam: string }) {
   const [status, setStatus] = useState('')
   const [teamId, setTeamId] = useState(initialTeam)
   const [season, setSeason] = useState('')
@@ -22,11 +20,6 @@ function MatchesContent() {
   const matches = data?.data ?? []
   const pagination = data?.pagination
   const totalPages = pagination?.total_pages ?? 1
-
-  useEffect(() => {
-    setTeamId(query.get('team_id') || '')
-    setPage(1)
-  }, [query])
 
   function update<T>(setter: (value: T) => void, value: T) { setter(value); setPage(1) }
 
@@ -45,6 +38,12 @@ function MatchesContent() {
       {totalPages > 1 && <nav className="mt-8 flex items-center justify-center gap-3" aria-label="Match pages"><button className="button-secondary" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button><span className="px-2 text-xs tabular-nums text-[var(--muted)]">Page {page} of {totalPages}</span><button className="button-secondary" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Next</button></nav>}
     </main>
   )
+}
+
+function MatchesContent() {
+  const query = useSearchParams()
+  const initialTeam = query.get('team_id') || ''
+  return <MatchesView key={initialTeam} initialTeam={initialTeam} />
 }
 
 export default function MatchesPage() {
