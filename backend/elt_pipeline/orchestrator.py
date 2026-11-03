@@ -75,10 +75,11 @@ class ETLOrchestrator:
             "ETLOrchestrator ready | provider='%s' | transformer='%s'",
             provider.name, transformer.provider_name,
         )
-        assert provider.name == transformer.provider_name, (
-            f"Provider '{provider.name}' and transformer '{transformer.provider_name}' mismatch! "
-            "They must be from the same data source."
-        )
+        if provider.name != transformer.provider_name:
+            raise ValueError(
+                f"Provider '{provider.name}' and transformer "
+                f"'{transformer.provider_name}' mismatch."
+            )
 
     def request_shutdown(self) -> None:
         self._shutdown.set()
