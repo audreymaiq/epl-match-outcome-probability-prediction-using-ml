@@ -19,14 +19,14 @@ class ModelService:
         if not prediction_svc.is_loaded:
             return {"status": "not_loaded", "version": None}
 
-        meta = prediction_svc._model_metadata
+        meta = prediction_svc.model_metadata
         return {
             "status": "loaded",
             "version": prediction_svc.model_version,
             "trained_at": meta.get("trained_at"),
             "training_seasons": meta.get("training_seasons", []),
-            "n_features": len(prediction_svc._feature_names),
-            "feature_names": prediction_svc._feature_names,
+            "n_features": len(prediction_svc.feature_names),
+            "feature_names": prediction_svc.feature_names,
             "algorithm": meta.get("algorithm", "ensemble"),
             "cv_evaluation_model": meta.get("cv_evaluation_model"),
             "walk_forward_folds": meta.get("walk_forward_folds"),
