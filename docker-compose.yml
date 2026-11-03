@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # Premier League Match Outcome Probability Prediction - Root Compose
-# Orchestrates: postgres, redis, mlflow, api, pipeline, frontend, monitoring
+# Orchestrates: postgres, api, frontend, on-demand pipelines and monitoring
 #
 # Usage:
 #   docker compose up -d               → start all core services
@@ -20,8 +20,7 @@ x-backend-env: &backend-env
   DB_PORT: "5432"
   DB_NAME: ${DB_NAME:-epl_db}
   DB_USER: ${DB_USER:-epl_user}
-  DB_PASSWORD: ${DB_PASSWORD:-epl_password}
-  MLFLOW_TRACKING_URI: http://mlflow:5000
+  DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   ENVIRONMENT: ${ENVIRONMENT:-production}
 
@@ -37,10 +36,10 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-epl_db}
       POSTGRES_USER: ${DB_USER:-epl_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-epl_password}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
     ports:
-      - "${DB_PORT_HOST:-5432}:5432"
+      - "127.0.0.1:${DB_PORT_HOST:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/docker/postgres/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -58,45 +57,18 @@ services:
     networks:
       - epl-network
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Redis - caching layer (scraping cache, rate limiter)
-  # ─────────────────────────────────────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: epl-redis
-    restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - epl-network
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # MLflow - experiment tracking
-  # ─────────────────────────────────────────────────────────────────────────
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.10.0
-    container_name: epl-mlflow
-    restart: unless-stopped
-    command: >
-      mlflow server
-      --backend-store-uri postgresql://${DB_USER:-epl_user}:${DB_PASSWORD:-epl_password}@postgres:5432/${DB_NAME:-epl_db}
-      --default-artifact-root /mlflow/artifacts
-      --host 0.0.0.0
-      --port 5000
+  migrate:
+    image: postgres:17-alpine
+    restart: "no"
     environment:
-      <<: *common-env
-    ports:
-      - "${MLFLOW_PORT:-5000}:5000"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${DB_NAME:-epl_db}
+      PGUSER: ${DB_USER:-epl_user}
+      PGPASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-1", "-f", "/migrations/006_reconcile_match_loader.sql"]
     volumes:
-      - mlflow_artifacts:/mlflow/artifacts
+      - ./backend/docker/postgres/migrations/006_reconcile_match_loader.sql:/migrations/006_reconcile_match_loader.sql:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,16 +86,17 @@ services:
     restart: unless-stopped
     environment:
       <<: *backend-env
-      MODEL_PATH: /app/models/ensemble_model.pkl
-      WORKERS: ${API_WORKERS:-2}
+      MODEL_PATH: ${MODEL_PATH:-/app/models/ensemble_model.pkl}
+      WEB_CONCURRENCY: ${API_WORKERS:-1}
+      ENABLE_METRICS: "true"
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     volumes:
       - ./backend/models:/app/models:ro
       - ./backend/logs:/app/logs
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -145,18 +118,56 @@ services:
     restart: "no"
     environment:
       <<: *backend-env
-      SOFASCORE_LEAGUE_ID: ${SOFASCORE_LEAGUE_ID:-17}
-      SOFASCORE_SEASON_ID: ${SOFASCORE_SEASON_ID:-52186}
+      SOFASCORE_EPL_ID: ${SOFASCORE_EPL_ID:-17}
       PROVIDER: ${PROVIDER:-sofascore}
     volumes:
       - ./backend/logs:/app/logs
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - epl-network
     profiles:
       - pipeline
+
+  features:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile.pipeline
+    restart: "no"
+    command: ["python", "-m", "ml.features.batch.orchestrator"]
+    environment:
+      <<: *backend-env
+      ML_CONFIG_PATH: ${ML_CONFIG_PATH:-/app/ml/config/default.json}
+    volumes:
+      - ./backend/ml/config:/app/ml/config:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - epl-network
+    profiles:
+      - pipeline
+
+  train:
+    build:
+      context: ./backend
+      dockerfile: docker/Dockerfile.pipeline
+    restart: "no"
+    command: ["python", "-m", "ml.training.train"]
+    environment:
+      <<: *backend-env
+      ML_CONFIG_PATH: ${ML_CONFIG_PATH:-/app/ml/config/default.json}
+    volumes:
+      - ./backend/models:/app/models
+      - ./backend/ml/config:/app/ml/config:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - epl-network
+    profiles:
+      - training
 
   # ─────────────────────────────────────────────────────────────────────────
   # Next.js Frontend
@@ -173,7 +184,7 @@ services:
       NODE_ENV: production
       API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
@@ -194,7 +205,7 @@ services:
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -210,10 +221,10 @@ services:
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "${GRAFANA_PORT:-3001}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./backend/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -237,10 +248,6 @@ networks:
 volumes:
   postgres_data:
     name: epl-postgres-data
-  redis_data:
-    name: epl-redis-data
-  mlflow_artifacts:
-    name: epl-mlflow-artifacts
   prometheus_data:
     name: epl-prometheus-data
   grafana_data:
