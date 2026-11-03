@@ -26,9 +26,6 @@ uvicorn[standard]>=0.30.0,<1.0
 httpx>=0.27.0,<1.0
 python-multipart>=0.0.9,<1.0
 
-# ── Caching & task queue ─────────────────────────────────────
-redis>=5.0.0,<6.0
-
 # ── ML core ──────────────────────────────────────────────────
 numpy>=1.26.0,<2.0
 pandas>=2.2.0,<3.0
@@ -37,27 +34,17 @@ xgboost>=2.1.0,<3.0
 lightgbm>=4.5.0,<5.0
 catboost>=1.2.5,<2.0
 
-# ── ML hyperparameter tuning ─────────────────────────────────
-optuna>=3.6.0,<4.0
-
 # ── ML experiment tracking ───────────────────────────────────
 mlflow>=2.16.0,<3.0
 
-# ── ML explainability ────────────────────────────────────────
-shap>=0.46.0,<1.0
 
-# ── Data drift & model monitoring ────────────────────────────
-evidently>=0.4.0,<1.0
 
 # ── Serialisation ────────────────────────────────────────────
-pyarrow>=17.0.0,<18.0     # fast DataFrame parquet I/O
 joblib>=1.4.0,<2.0         # model serialisation
 
 # ── Observability ────────────────────────────────────────────
 prometheus-fastapi-instrumentator>=7.0.0,<8.0
 prometheus-client>=0.20.0,<1.0
-structlog>=24.1.0,<25.0
-python-json-logger>=2.0.0,<4.0
 
 # ── Testing ──────────────────────────────────────────────────
 pytest>=8.2.0,<9.0
