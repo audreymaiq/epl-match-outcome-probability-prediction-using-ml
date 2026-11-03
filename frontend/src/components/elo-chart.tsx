@@ -74,14 +74,14 @@ export function EloChart({ data, teamName, height = 200 }: EloChartProps) {
             }}
             labelStyle={{ color: 'rgba(255,255,255,0.5)', fontSize: 10 }}
             itemStyle={{ color: '#00ff85' }}
-            labelFormatter={(label: string) =>
-              new Date(label).toLocaleDateString('en-GB', {
+            labelFormatter={(label) =>
+              new Date(typeof label === 'string' || typeof label === 'number' ? label : '').toLocaleDateString('en-GB', {
                 day: 'numeric',
                 month: 'short',
                 year: 'numeric',
               })
             }
-            formatter={(value: number) => [value.toFixed(0), 'ELO']}
+            formatter={(value) => [typeof value === 'number' ? value.toFixed(0) : String(value ?? '—'), 'ELO']}
           />
           {/* Average ELO reference */}
           <ReferenceLine
