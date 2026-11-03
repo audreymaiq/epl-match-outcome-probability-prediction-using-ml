@@ -36,6 +36,14 @@ class StackingConfig:
 @dataclass(frozen=True)
 class FeatureConfig:
     form_decay: float
+    expected_home_goals_multiplier: float
+    h2h_over_2_5_prior: float
+    h2h_btts_prior: float
+    referee_avg_reds_prior: float
+    referee_cards_scale: float
+    rest_days_max: float
+    top_teams: list[str]
+    derbies: list[list[str]]
     min_matches: dict[str, int]
     defaults: dict[str, float]
 
@@ -77,8 +85,9 @@ def parse_ml_config(data: dict[str, Any]) -> MLConfig:
         raise ValueError("ML config model_name must be a safe filename stem")
     _positive_int(data["random_seed"], "random_seed", minimum=0)
     elo = _section(data, "elo", {
-        "initial_elo", "home_advantage", "k_base", "k_big_match", "k_early_season",
+        "initial_elo", "home_advantage", "rating_scale", "k_base", "k_big_match", "k_early_season",
         "k_max", "season_regression_factor", "gd_weight", "gd_cap", "elo_min", "elo_max",
+        "draw_base", "draw_reduction", "draw_min", "draw_slope", "draw_midpoint",
     })
     if any(type(value) not in (int, float) or not math.isfinite(value) for value in elo.values()):
         raise ValueError("ML config elo parameters must be numeric")
@@ -86,8 +95,10 @@ def parse_ml_config(data: dict[str, Any]) -> MLConfig:
         raise ValueError("ML config elo bounds must contain initial_elo")
     if not 0 <= elo["season_regression_factor"] <= 1:
         raise ValueError("ML config elo season_regression_factor must be in [0, 1]")
-    if min(elo[name] for name in ("k_base", "k_big_match", "k_early_season", "k_max", "gd_weight", "gd_cap")) <= 0:
+    if min(elo[name] for name in ("rating_scale", "k_base", "k_big_match", "k_early_season", "k_max", "gd_weight", "gd_cap", "draw_slope")) <= 0:
         raise ValueError("ML config elo update weights must be positive")
+    if not 0 <= elo["draw_min"] <= elo["draw_base"] <= 1 or not 0 <= elo["draw_reduction"] <= elo["draw_base"]:
+        raise ValueError("ML config elo draw probability bounds are invalid")
     feature_data = _section(data, "features", set(FeatureConfig.__dataclass_fields__))
     default_keys = {
         "elo", "elo_diff", "elo_win_prob_home", "form5_ppg", "form5_avg_scored",
@@ -109,6 +120,27 @@ def parse_ml_config(data: dict[str, Any]) -> MLConfig:
     decay = feature_data["form_decay"]
     if type(decay) not in (int, float) or not math.isfinite(decay) or not 0 < decay <= 1:
         raise ValueError("ML config features.form_decay must be in (0, 1]")
+    for key in ("h2h_over_2_5_prior", "h2h_btts_prior"):
+        value = feature_data[key]
+        if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError(f"ML config features.{key} must be in [0, 1]")
+    for key in ("expected_home_goals_multiplier", "referee_cards_scale", "rest_days_max"):
+        value = feature_data[key]
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"ML config features.{key} must be positive")
+    value = feature_data["referee_avg_reds_prior"]
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        raise ValueError("ML config features.referee_avg_reds_prior must be nonnegative")
+    teams = feature_data["top_teams"]
+    derbies = feature_data["derbies"]
+    if not isinstance(teams, list) or any(not isinstance(team, str) or not team for team in teams) or len(teams) != len(set(teams)):
+        raise ValueError("ML config features.top_teams must contain unique team names")
+    if not isinstance(derbies, list) or any(
+        not isinstance(pair, list) or len(pair) != 2 or
+        any(not isinstance(team, str) or not team for team in pair) or pair[0] == pair[1]
+        for pair in derbies
+    ):
+        raise ValueError("ML config features.derbies must contain pairs of distinct team names")
     cv_data = _section(data, "cv", set(CVConfig.__dataclass_fields__))
     stack_data = _section(data, "stacking", set(StackingConfig.__dataclass_fields__))
     for key, value in cv_data.items():
