@@ -1,38 +1,5 @@
 # ml/features/feature_extractor.py
-"""
-Football Feature Extractor - EPL Domain-Complete Implementation.
-
-Feature Tiers (by predictive power):
-  TIER 1 - Highest impact (must have):
-    - ELO ratings (home_elo, away_elo, elo_diff, elo_win_prob)
-    - Rolling form (last 5, last 10, weighted by recency)
-    - Season cumulative stats (home/away/overall splits)
-    - Head-to-head historical (all-time, BOTH directions)
-
-  TIER 2 - High impact:
-    - Squad availability (key player absences, GK absent)
-    - Referee tendencies (home win bias, cards/game, draw rate)
-    - Rest/fatigue (days since last match, days of rest diff)
-    - Attack/Defense strength (Dixon-Coles style parameters)
-
-  TIER 3 - Medium impact:
-    - Streak (current W/D/L run)
-    - Home team venue advantage (team-specific, not global)
-    - Derby/rivalry flag
-    - Season stage (early/mid/late - affects home advantage)
-    - Match week number
-
-  TIER 4 - Contextual enrichment:
-    - European competition fatigue (midweek game)
-    - Derived cross-features (form diff, consistency, trend)
-
-Design Principles:
-  - Strict time-safety: ALL aggregations use matches STRICTLY BEFORE current match_datetime
-  - No data leakage: pre-match features only
-  - Graceful degradation: NaN → sensible EPL league averages (never crashes)
-  - Single responsibility: one method per feature group
-  - Open for extension: add_feature_group() pattern
-"""
+"""Extract match features for training and pre match inference."""
 
 from __future__ import annotations
 
@@ -45,42 +12,10 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ml.elo.elo_calculator import DEFAULT_CONFIG, EloCalculator
+from ml.elo.elo_calculator import EloCalculator, EloConfig
+from ml.config import MLConfig, load_ml_config
 
 logger = logging.getLogger(__name__)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# EPL League-wide empirical averages (used as fallback when history < threshold)
-# Source: 10 seasons of EPL data analysis
-# ─────────────────────────────────────────────────────────────────────────────
-EPL_DEFAULTS = {
-    "elo":                  1500.0,   # Starting ELO for a mid-table team
-    "elo_diff":             0.0,
-    "elo_win_prob_home":    0.45,     # Historical EPL home win rate
-    "form5_ppg":            1.35,     # Average PPG over last 5 in EPL
-    "form5_avg_scored":     1.36,
-    "form5_avg_conceded":   1.36,
-    "season_ppg":           1.35,
-    "season_avg_scored":    1.36,
-    "season_avg_conceded":  1.36,
-    "h2h_home_win_rate":    0.45,
-    "h2h_draw_rate":        0.25,
-    "h2h_avg_goals":        2.72,
-    "referee_home_win_rate":0.45,
-    "referee_draw_rate":    0.25,
-    "referee_avg_yellows":  3.5,
-    "rest_days":            7.0,
-    "form5_clean_sheets":   1.5,
-    "attack_strength":      1.0,
-    "defense_strength":     1.0,
-}
-
-# Minimum matches needed before we trust a rolling stat
-MIN_MATCHES_FORM       = 2
-MIN_MATCHES_H2H        = 3
-MIN_MATCHES_REFEREE    = 5
-MIN_MATCHES_SEASON     = 3
 
 
 class FeatureExtractor:
@@ -93,8 +28,11 @@ class FeatureExtractor:
         df = extractor.extract_all_finished_matches()      # → DataFrame (N rows)
     """
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, config: Optional[MLConfig] = None):
         self._db = session
+        self._config = config or load_ml_config()
+        self._defaults = self._config.features.defaults
+        self._elo_config = EloConfig(**self._config.elo)
 
     # ── Public entry points ───────────────────────────────────────────────────
 
@@ -300,10 +238,10 @@ class FeatureExtractor:
         def rating_before_match(team_id: int) -> float:
             latest = self._get_latest_elo(team_id, dt)
             if latest is None:
-                return DEFAULT_CONFIG.initial_elo
+                return self._defaults["elo"]
             rating, previous_season = latest
             if season_name and previous_season != season_name:
-                return EloCalculator().season_regression(rating)
+                return EloCalculator(self._elo_config).season_regression(rating)
             return rating
 
         home_elo = rating_before_match(home_id)
@@ -312,9 +250,9 @@ class FeatureExtractor:
 
         # Logistic win probability (ELO standard)
         elo_win_prob_home = 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
-        # Apply EPL home advantage bias (+65 ELO points conceptually)
+        # Apply the configured home advantage in Elo points.
         elo_win_prob_home_adj = 1.0 / (
-            1.0 + 10.0 ** (-(elo_diff + DEFAULT_CONFIG.home_advantage) / 400.0)
+            1.0 + 10.0 ** (-(elo_diff + self._elo_config.home_advantage) / 400.0)
         )
 
         return {
@@ -350,7 +288,7 @@ class FeatureExtractor:
     ) -> Dict[str, Any]:
         """
         Compute rolling form statistics for last 5 and last 10 matches.
-        Weighted by recency (exponential decay, λ=0.85).
+        Weighted by recency using the configured exponential decay.
         """
         loc_cond = ""
         params: Dict[str, Any] = {"tid": team_id, "dt": before_dt, "n": n_last}
@@ -392,8 +330,8 @@ class FeatureExtractor:
         results = [r.result for r in rows]
         scored   = [r.scored   or 0 for r in rows]
         conceded = [r.conceded or 0 for r in rows]
-        # Weights: most recent match = weight 1.0, older = 0.85^k
-        weights = [0.85 ** i for i in range(len(rows))]
+        # Most recent match has weight 1; earlier matches decay by age.
+        weights = [self._config.features.form_decay ** i for i in range(len(rows))]
 
         def weighted_avg(values, w):
             return sum(v * wt for v, wt in zip(values, w)) / sum(w) if w else 0
@@ -453,9 +391,9 @@ class FeatureExtractor:
             d[f"{prefix}_form{n}_wins"]          = 0
             d[f"{prefix}_form{n}_draws"]         = 0
             d[f"{prefix}_form{n}_losses"]        = 0
-            d[f"{prefix}_form{n}_ppg"]           = EPL_DEFAULTS["form5_ppg"]
-            d[f"{prefix}_form{n}_avg_scored"]    = EPL_DEFAULTS["form5_avg_scored"]
-            d[f"{prefix}_form{n}_avg_conceded"]  = EPL_DEFAULTS["form5_avg_conceded"]
+            d[f"{prefix}_form{n}_ppg"]           = self._defaults["form5_ppg"]
+            d[f"{prefix}_form{n}_avg_scored"]    = self._defaults["form5_avg_scored"]
+            d[f"{prefix}_form{n}_avg_conceded"]  = self._defaults["form5_avg_conceded"]
             d[f"{prefix}_form{n}_clean_sheets"]  = 0
             d[f"{prefix}_form{n}_goal_diff"]     = 0.0
         d[f"{prefix}_momentum_score"] = 0
@@ -550,16 +488,16 @@ class FeatureExtractor:
         row = self._db.execute(text(sql), params).fetchone()
 
         mp = int(row.mp or 0) if row else 0
-        if mp < MIN_MATCHES_SEASON:
+        if mp < self._config.features.min_matches["season"]:
             suffix = f"_loc" if location != "Overall" else ""
             return {
                 f"{prefix}_season{suffix}_mp":           mp,
-                f"{prefix}_season{suffix}_ppg":          EPL_DEFAULTS["season_ppg"],
-                f"{prefix}_season{suffix}_avg_scored":   EPL_DEFAULTS["season_avg_scored"],
-                f"{prefix}_season{suffix}_avg_conceded": EPL_DEFAULTS["season_avg_conceded"],
-                f"{prefix}_season{suffix}_win_rate":     0.45,
-                f"{prefix}_season{suffix}_draw_rate":    0.25,
-                f"{prefix}_season{suffix}_loss_rate":    0.30,
+                f"{prefix}_season{suffix}_ppg":          self._defaults["season_ppg"],
+                f"{prefix}_season{suffix}_avg_scored":   self._defaults["season_avg_scored"],
+                f"{prefix}_season{suffix}_avg_conceded": self._defaults["season_avg_conceded"],
+                f"{prefix}_season{suffix}_win_rate":     self._defaults["h2h_home_win_rate"],
+                f"{prefix}_season{suffix}_draw_rate":    self._defaults["h2h_draw_rate"],
+                f"{prefix}_season{suffix}_loss_rate":    1 - self._defaults["h2h_home_win_rate"] - self._defaults["h2h_draw_rate"],
                 f"{prefix}_season{suffix}_clean_sheets": 0,
                 f"{prefix}_season{suffix}_gd":           0.0,
             }
@@ -609,14 +547,14 @@ class FeatureExtractor:
         rows = self._db.execute(text(sql), {"hid": home_id, "aid": away_id, "dt": before_dt}).fetchall()
         total = len(rows)
 
-        if total < MIN_MATCHES_H2H:
+        if total < self._config.features.min_matches["h2h"]:
             return {
                 "h2h_total_meetings":  total,
-                "h2h_home_win_rate":   EPL_DEFAULTS["h2h_home_win_rate"],
-                "h2h_draw_rate":       EPL_DEFAULTS["h2h_draw_rate"],
-                "h2h_away_win_rate":   1 - EPL_DEFAULTS["h2h_home_win_rate"] - EPL_DEFAULTS["h2h_draw_rate"],
-                "h2h_avg_home_goals":  EPL_DEFAULTS["form5_avg_scored"],
-                "h2h_avg_away_goals":  EPL_DEFAULTS["form5_avg_scored"],
+                "h2h_home_win_rate":   self._defaults["h2h_home_win_rate"],
+                "h2h_draw_rate":       self._defaults["h2h_draw_rate"],
+                "h2h_away_win_rate":   1 - self._defaults["h2h_home_win_rate"] - self._defaults["h2h_draw_rate"],
+                "h2h_avg_home_goals":  self._defaults["form5_avg_scored"],
+                "h2h_avg_away_goals":  self._defaults["form5_avg_scored"],
                 "h2h_over_2_5_rate":   0.53,
                 "h2h_btts_rate":       0.48,
                 "h2h_home_dominance":  0.0,
@@ -715,7 +653,7 @@ class FeatureExtractor:
               {season_cond}
         """
         lg_row = self._db.execute(text(lg_sql), params).fetchone()
-        lg_avg = float(lg_row.lg_avg_scored or EPL_DEFAULTS["form5_avg_scored"])
+        lg_avg = float(lg_row.lg_avg_scored or self._defaults["form5_avg_scored"])
 
         def _team_strength(team_id: int) -> Tuple[float, float]:
             t_sql = f"""
@@ -815,9 +753,9 @@ class FeatureExtractor:
         if not referee_id:
             return {
                 "referee_games":          0,
-                "referee_home_win_rate":  EPL_DEFAULTS["referee_home_win_rate"],
-                "referee_draw_rate":      EPL_DEFAULTS["referee_draw_rate"],
-                "referee_avg_yellows":    EPL_DEFAULTS["referee_avg_yellows"],
+                "referee_home_win_rate":  self._defaults["referee_home_win_rate"],
+                "referee_draw_rate":      self._defaults["referee_draw_rate"],
+                "referee_avg_yellows":    self._defaults["referee_avg_yellows"],
                 "referee_avg_reds":       0.1,
                 "referee_cards_tendency": 0.0,
             }
@@ -845,23 +783,23 @@ class FeatureExtractor:
         row = self._db.execute(text(sql), {"rid": referee_id, "dt": before_dt}).fetchone()
         games = int(row.games or 0) if row else 0
 
-        if games < MIN_MATCHES_REFEREE:
+        if games < self._config.features.min_matches["referee"]:
             return {
                 "referee_games":          games,
-                "referee_home_win_rate":  EPL_DEFAULTS["referee_home_win_rate"],
-                "referee_draw_rate":      EPL_DEFAULTS["referee_draw_rate"],
-                "referee_avg_yellows":    EPL_DEFAULTS["referee_avg_yellows"],
+                "referee_home_win_rate":  self._defaults["referee_home_win_rate"],
+                "referee_draw_rate":      self._defaults["referee_draw_rate"],
+                "referee_avg_yellows":    self._defaults["referee_avg_yellows"],
                 "referee_avg_reds":       0.1,
                 "referee_cards_tendency": 0.0,
             }
 
-        avg_yc = float(row.avg_yc or EPL_DEFAULTS["referee_avg_yellows"])
-        cards_tendency = (avg_yc - EPL_DEFAULTS["referee_avg_yellows"]) / 1.5
+        avg_yc = float(row.avg_yc or self._defaults["referee_avg_yellows"])
+        cards_tendency = (avg_yc - self._defaults["referee_avg_yellows"]) / 1.5
 
         return {
             "referee_games":          games,
-            "referee_home_win_rate":  float(row.hw_rate or EPL_DEFAULTS["referee_home_win_rate"]),
-            "referee_draw_rate":      float(row.draw_rate or EPL_DEFAULTS["referee_draw_rate"]),
+            "referee_home_win_rate":  float(row.hw_rate or self._defaults["referee_home_win_rate"]),
+            "referee_draw_rate":      float(row.draw_rate or self._defaults["referee_draw_rate"]),
             "referee_avg_yellows":    avg_yc,
             "referee_avg_reds":       float(row.avg_rc or 0.1),
             "referee_cards_tendency": round(cards_tendency, 4),
@@ -883,7 +821,7 @@ class FeatureExtractor:
             """
             row = self._db.execute(text(sql), {"tid": team_id, "dt": match_dt}).fetchone()
             if not row or not row.last_dt:
-                return EPL_DEFAULTS["rest_days"]
+                return self._defaults["rest_days"]
             last = row.last_dt
             if hasattr(last, 'replace'):
                 if last.tzinfo is None and match_dt.tzinfo is not None:
@@ -1087,14 +1025,17 @@ class FeatureExtractor:
                     WHERE away_team_id=:tid AND status='FINISHED' AND match_datetime<:dt
                 )
                 SELECT
-                    COALESCE(h.ppg, 1.35) AS home_ppg,
-                    COALESCE(a.ppg, 1.35) AS away_ppg
+                    COALESCE(h.ppg, :league_ppg) AS home_ppg,
+                    COALESCE(a.ppg, :league_ppg) AS away_ppg
                 FROM home_ppg h, away_ppg a
             """
-            row = self._db.execute(text(sql), {"tid": team_id, "dt": before_dt}).fetchone()
+            row = self._db.execute(text(sql), {
+                "tid": team_id, "dt": before_dt,
+                "league_ppg": self._defaults["season_ppg"],
+            }).fetchone()
             if not row:
                 return 0.0
-            return round(float(row.home_ppg or 1.35) - float(row.away_ppg or 1.35), 4)
+            return round(float(row.home_ppg) - float(row.away_ppg), 4)
 
         home_team_ha = _home_adv(home_id)
         away_team_ha = _home_adv(away_id)
@@ -1156,12 +1097,12 @@ class FeatureExtractor:
         derived = {}
 
         # ── Form differentials ───────────────────────────────────────────────
-        h_ppg5 = home_form.get("home_form5_ppg", EPL_DEFAULTS["form5_ppg"])
-        a_ppg5 = away_form.get("away_form5_ppg", EPL_DEFAULTS["form5_ppg"])
+        h_ppg5 = home_form.get("home_form5_ppg", self._defaults["form5_ppg"])
+        a_ppg5 = away_form.get("away_form5_ppg", self._defaults["form5_ppg"])
         derived["form5_ppg_diff"] = round(h_ppg5 - a_ppg5, 4)
 
-        h_ppg10 = home_form.get("home_form10_ppg", EPL_DEFAULTS["form5_ppg"])
-        a_ppg10 = away_form.get("away_form10_ppg", EPL_DEFAULTS["form5_ppg"])
+        h_ppg10 = home_form.get("home_form10_ppg", self._defaults["form5_ppg"])
+        a_ppg10 = away_form.get("away_form10_ppg", self._defaults["form5_ppg"])
         derived["form10_ppg_diff"] = round(h_ppg10 - a_ppg10, 4)
 
         # Momentum differential
@@ -1170,22 +1111,22 @@ class FeatureExtractor:
         derived["momentum_diff"] = h_mom - a_mom
 
         # Goals scored differential (form5)
-        h_gs = home_form.get("home_form5_avg_scored", EPL_DEFAULTS["form5_avg_scored"])
-        a_gs = away_form.get("away_form5_avg_scored", EPL_DEFAULTS["form5_avg_scored"])
+        h_gs = home_form.get("home_form5_avg_scored", self._defaults["form5_avg_scored"])
+        a_gs = away_form.get("away_form5_avg_scored", self._defaults["form5_avg_scored"])
         derived["form5_avg_scored_diff"] = round(h_gs - a_gs, 4)
 
         # Goals conceded differential (form5) - lower = better defense
-        h_gc = home_form.get("home_form5_avg_conceded", EPL_DEFAULTS["form5_avg_conceded"])
-        a_gc = away_form.get("away_form5_avg_conceded", EPL_DEFAULTS["form5_avg_conceded"])
+        h_gc = home_form.get("home_form5_avg_conceded", self._defaults["form5_avg_conceded"])
+        a_gc = away_form.get("away_form5_avg_conceded", self._defaults["form5_avg_conceded"])
         derived["form5_avg_conceded_diff"] = round(h_gc - a_gc, 4)
 
         # ── Season differentials ─────────────────────────────────────────────
-        h_sppg = home_season.get("home_season_ppg", EPL_DEFAULTS["season_ppg"])
-        a_sppg = away_season.get("away_season_ppg", EPL_DEFAULTS["season_ppg"])
+        h_sppg = home_season.get("home_season_ppg", self._defaults["season_ppg"])
+        a_sppg = away_season.get("away_season_ppg", self._defaults["season_ppg"])
         derived["season_ppg_diff"] = round(h_sppg - a_sppg, 4)
 
-        h_swr = home_season.get("home_season_win_rate", 0.45)
-        a_swr = away_season.get("away_season_win_rate", 0.45)
+        h_swr = home_season.get("home_season_win_rate", self._defaults["h2h_home_win_rate"])
+        a_swr = away_season.get("away_season_win_rate", self._defaults["h2h_home_win_rate"])
         derived["season_win_rate_diff"] = round(h_swr - a_swr, 4)
 
         h_sgd = home_season.get("home_season_gd", 0.0)
@@ -1193,8 +1134,8 @@ class FeatureExtractor:
         derived["season_gd_diff"] = round(h_sgd - a_sgd, 4)
 
         # ── xG overperformance (form goals vs expected) ──────────────────────
-        exp_hg = row.get("expected_home_goals", EPL_DEFAULTS["form5_avg_scored"])
-        exp_ag = row.get("expected_away_goals", EPL_DEFAULTS["form5_avg_scored"])
+        exp_hg = row.get("expected_home_goals", self._defaults["form5_avg_scored"])
+        exp_ag = row.get("expected_away_goals", self._defaults["form5_avg_scored"])
         derived["home_xg_overperformance"] = round(h_gs - exp_hg, 4) if exp_hg else 0.0
         derived["away_xg_overperformance"] = round(a_gs - exp_ag, 4) if exp_ag else 0.0
 
@@ -1226,7 +1167,7 @@ class FeatureExtractor:
             SELECT
                 m.id, m.home_team_id, m.away_team_id,
                 m.match_datetime, m.match_week, m.season_id,
-                m.referee_id, m.outcome,
+                m.referee_id, m.outcome, m.status,
                 s.name AS season_name,
                 ht.name AS home_team_name,
                 at.name AS away_team_name
@@ -1254,6 +1195,7 @@ class FeatureExtractor:
             "season_name":   row.season_name,
             "referee_id":    row.referee_id,
             "outcome":       row.outcome,
+            "status":        row.status,
             "home_team_name": row.home_team_name,
             "away_team_name": row.away_team_name,
         }
