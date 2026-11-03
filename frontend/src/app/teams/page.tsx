@@ -11,9 +11,8 @@ import type { Team } from '@/lib/types'
 export default function TeamsPage() {
   const [search, setSearch] = useState('')
   const { data, isLoading, isError } = useTeams()
-  const teams = data?.data ?? []
   const totalTeams = data?.pagination.total
-  const filteredTeams = useMemo(() => teams.filter((team: Team) => team.name.toLowerCase().includes(search.trim().toLowerCase())), [search, teams])
+  const filteredTeams = useMemo(() => (data?.data ?? []).filter((team: Team) => team.name.toLowerCase().includes(search.trim().toLowerCase())), [search, data?.data])
 
   return (
     <main className="page-frame pb-16 pt-8 sm:pt-12">
