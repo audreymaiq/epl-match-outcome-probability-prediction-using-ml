@@ -57,14 +57,15 @@ class MatchLoader(AbstractLoader):
 
     Usage:
         with DatabaseConnector.session_scope() as session:
-            loader = MatchLoader(session)
+            loader = MatchLoader(session, source_system="sofascore")
             loader.bulk_load(bundles)
     """
 
-    SOURCE_SYSTEM = "sofascore"
-
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, source_system: str):
+        if not source_system or not source_system.strip():
+            raise ValueError("source_system is required for external ID mapping.")
         self._session = session
+        self.SOURCE_SYSTEM = source_system.strip()
         # In-memory cache: "entity_type:external_id" -> internal_id
         # Avoids N+1 DB lookups for the same team/player across many matches.
         self._cache: Dict[str, int] = {}
