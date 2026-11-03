@@ -40,8 +40,8 @@ APP_DESCRIPTION = """
 ## EPL Match Outcome Prediction System
 
 Provides calibrated win/draw/loss probabilities for Premier League matches
-using a stacking ensemble of XGBoost, LightGBM and CatBoost models
-trained on 7+ seasons of historical data.
+using a stacking ensemble of XGBoost, LightGBM and CatBoost when a trained
+artifact is installed.
 
 ### Feature Engineering
 - **ELO ratings** (adaptive K-factor, home advantage correction)
