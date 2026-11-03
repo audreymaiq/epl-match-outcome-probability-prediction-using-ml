@@ -3,39 +3,44 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { ArrowRight, CalendarDays, ChevronRight } from 'lucide-react'
-import { useMatches, useTeams, usePredict, useModelInfo } from '@/lib/hooks'
+import { useMatches, useTeams, usePredict, useModelInfo, useSeasons } from '@/lib/hooks'
 import { MatchCard } from '@/components/match-card'
 import { ProbabilityBars } from '@/components/probability-bars'
 import type { Team } from '@/lib/types'
 
-function localDate() {
+function defaultKickoff() {
   const date = new Date()
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  date.setDate(date.getDate() + 1)
+  date.setHours(15, 0, 0, 0)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
 function MatchEstimator() {
   const { data: teamsPage, isLoading: teamsLoading } = useTeams()
   const { data: modelInfo } = useModelInfo()
-  const seasons = modelInfo?.training_seasons ?? []
+  const { data: seasons = [] } = useSeasons()
+  const modelReady = modelInfo?.status === 'loaded'
   const teams = teamsPage?.data ?? []
   const prediction = usePredict()
   const [homeId, setHomeId] = useState('')
   const [awayId, setAwayId] = useState('')
-  const [matchDate, setMatchDate] = useState(localDate)
+  const [matchDate, setMatchDate] = useState(defaultKickoff)
   const [seasonName, setSeasonName] = useState('')
   const [matchWeek, setMatchWeek] = useState('1')
 
   useEffect(() => {
-    if (!seasonName && seasons.length) setSeasonName(seasons[seasons.length - 1])
+    if (!seasonName && seasons.length) setSeasonName(seasons[0])
   }, [seasonName, seasons])
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!homeId || !awayId || homeId === awayId || !seasonName || !matchWeek) return
+    if (!modelReady || !homeId || !awayId || homeId === awayId || !seasonName || !matchWeek) return
+    const kickoff = new Date(matchDate)
+    if (!Number.isFinite(kickoff.getTime()) || kickoff.getTime() <= Date.now()) return
     prediction.mutate({
       home_team_id: Number(homeId),
       away_team_id: Number(awayId),
-      match_datetime: `${matchDate}T15:00:00Z`,
+      match_datetime: kickoff.toISOString(),
       season_name: seasonName,
       match_week: Number(matchWeek),
     })
@@ -51,10 +56,10 @@ function MatchEstimator() {
       <form onSubmit={submit} className="space-y-3">
         <label className="block space-y-1.5"><span className="data-label">Home club</span><select className="field-control" value={homeId} onChange={(event) => { setHomeId(event.target.value); prediction.reset() }} required disabled={teamsLoading}><option value="">{teamsLoading ? 'Loading clubs…' : 'Select a club'}</option>{teams.map((team: Team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
         <label className="block space-y-1.5"><span className="data-label">Away club</span><select className="field-control" value={awayId} onChange={(event) => { setAwayId(event.target.value); prediction.reset() }} required disabled={teamsLoading}><option value="">Select a club</option>{teams.filter((team: Team) => String(team.id) !== homeId).map((team: Team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
-        <label className="block space-y-1.5"><span className="data-label">Match date</span><input className="field-control" type="date" value={matchDate} onChange={(event) => { setMatchDate(event.target.value); prediction.reset() }} required /></label>
+        <label className="block space-y-1.5"><span className="data-label">Kickoff in your time zone</span><input className="field-control" type="datetime-local" value={matchDate} onChange={(event) => { setMatchDate(event.target.value); prediction.reset() }} required /></label>
         <label className="block space-y-1.5"><span className="data-label">Season</span><select className="field-control" value={seasonName} onChange={(event) => { setSeasonName(event.target.value); prediction.reset() }} required disabled={!seasons.length}><option value="">Select a season</option>{seasons.map((season) => <option key={season} value={season}>{season}</option>)}</select></label>
         <label className="block space-y-1.5"><span className="data-label">Matchweek</span><input className="field-control" type="number" min="1" max="38" value={matchWeek} onChange={(event) => { setMatchWeek(event.target.value); prediction.reset() }} required /></label>
-        <button className="button-primary w-full" type="submit" disabled={!homeId || !awayId || !seasonName || !matchWeek || prediction.isPending}>{prediction.isPending ? 'Calculating…' : 'Show probabilities'}<ArrowRight size={15} /></button>
+        <button className="button-primary w-full" type="submit" disabled={!modelReady || !homeId || !awayId || !seasonName || !matchWeek || prediction.isPending}>{prediction.isPending ? 'Calculating…' : modelReady ? 'Show probabilities' : 'Model not installed'}<ArrowRight size={15} /></button>
       </form>
       {prediction.isError && <p role="alert" className="mt-4 border-l-2 border-[var(--danger)] bg-[rgba(255,139,145,.07)] p-3 text-xs leading-5 text-[var(--danger)]">The estimate could not be generated. The prediction service may be unavailable.</p>}
       {prediction.data && <div className="mt-5 border-t border-[var(--border)] pt-5"><div className="mb-4 flex items-baseline justify-between gap-3"><div><p className="data-label">Most likely result</p><p className="mt-1 text-sm font-bold text-white">{prediction.data.predicted_outcome === 'H' ? `${prediction.data.home_team_name} win` : prediction.data.predicted_outcome === 'A' ? `${prediction.data.away_team_name} win` : 'Draw'}</p></div><span className="font-mono text-sm font-bold tabular-nums text-[var(--pl-green)]">{(prediction.data.confidence * 100).toFixed(0)}%</span></div><ProbabilityBars probabilities={prediction.data.probabilities} predicted_outcome={prediction.data.predicted_outcome} homeTeam={prediction.data.home_team_name} awayTeam={prediction.data.away_team_name} compact /><p className="mt-4 text-[0.68rem] leading-5 text-[var(--subtle)]">Estimates are based on historical data and do not guarantee a result.</p></div>}
