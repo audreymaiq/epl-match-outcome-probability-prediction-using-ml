@@ -70,10 +70,20 @@ class PredictionService:
     def model_version(self) -> str:
         return self._predictor.version
 
+    @property
+    def model_metadata(self) -> Dict[str, Any]:
+        return dict(self._predictor.metadata)
+
+    @property
+    def feature_names(self) -> list[str]:
+        return list(self._predictor.feature_names)
+
     def predict(
         self,
         request: PredictRequest,
         db_session,
+        *,
+        record_prediction: bool = True,
     ) -> PredictResponse:
         """
         Main inference method.
@@ -81,6 +91,7 @@ class PredictionService:
         Args:
             request:    Validated PredictRequest.
             db_session: SQLAlchemy session for feature extraction.
+            record_prediction: Persist the first prediction for a registered fixture.
 
         Returns:
             PredictResponse with calibrated probabilities.
@@ -132,7 +143,7 @@ class PredictionService:
             key_features=key_features,
             feature_vector=feature_vector,
         )
-        if response.match_id is not None:
+        if record_prediction and response.match_id is not None:
             self._save_prediction(db_session, response)
         return response
 
