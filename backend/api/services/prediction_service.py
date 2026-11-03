@@ -6,25 +6,27 @@ Responsibilities:
   1. Load trained ensemble model from disk (once at startup)
   2. Build feature vector for a match using FeatureExtractor
   3. Run inference → calibrated probabilities [P(H), P(D), P(A)]
-  4. Compute SHAP key features for explainability
+  4. Return selected input features for context
   5. Persist prediction to DB (for monitoring/evaluation)
 
 Design:
   - Model loading is lazy but thread-safe (called once via @lru_cache dependency)
   - Stateless predict() method: safe for concurrent requests
-  - Falls back gracefully if SHAP not installed
+  - Returns predictions only when a validated artifact is loaded
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-import joblib
 import numpy as np
+import pandas as pd
+from sqlalchemy import text
+from ml.inference.predictor import ModelPredictor
+from ml.config import parse_ml_config
 
 from api.schemas.prediction import (
     PredictRequest, PredictResponse, ProbabilityBreakdown, KeyFeatures,
@@ -35,10 +37,6 @@ from api.exceptions import ModelNotLoadedException, PredictionFailedException
 
 logger = logging.getLogger(__name__)
 
-# Default model path - override via MODEL_PATH env var
-DEFAULT_MODEL_PATH = Path(__file__).parent.parent.parent / "models" / "ensemble_model.pkl"
-
-
 class PredictionService:
     """
     Encapsulates all ML inference logic.
@@ -47,56 +45,30 @@ class PredictionService:
     """
 
     def __init__(self, model_path: Optional[Path] = None):
-        self._model_path = Path(model_path or os.getenv("MODEL_PATH", str(DEFAULT_MODEL_PATH)))
-        self._model = None
-        self._model_metadata: Dict[str, Any] = {}
-        self._feature_names: list = []
-        self._is_loaded = False
+        self._predictor = ModelPredictor(model_path)
 
     def load_model(self) -> None:
         """
         Load model from disk. Called once at application startup.
         Raises RuntimeError if model file is missing.
         """
-        if self._is_loaded:
-            return
-
-        if not self._model_path.exists():
-            logger.warning(
-                "Model file not found at %s. Predictions will be unavailable until training completes.",
-                self._model_path,
-            )
-            return
-
         try:
-            artifact = joblib.load(self._model_path)
-            # Expected artifact format: dict with 'model', 'metadata', 'feature_names'
-            if isinstance(artifact, dict):
-                self._model = artifact.get("model")
-                self._model_metadata = artifact.get("metadata", {})
-                self._feature_names = artifact.get("feature_names", [])
+            if not self._predictor.load():
+                logger.warning("Model file not found at %s. Predictions are unavailable.", self._predictor.path)
             else:
-                # Bare model (legacy format)
-                self._model = artifact
-
-            self._is_loaded = True
-            logger.info(
-                "Model loaded successfully from %s | version=%s | features=%d",
-                self._model_path,
-                self._model_metadata.get("version", "unknown"),
-                len(self._feature_names),
-            )
+                logger.info("Model loaded from %s | version=%s | features=%d",
+                            self._predictor.path, self.model_version, len(self._predictor.feature_names))
         except Exception as exc:
-            logger.error("Failed to load model from %s: %s", self._model_path, exc, exc_info=True)
+            logger.error("Failed to load model from %s: %s", self._predictor.path, exc, exc_info=True)
             raise RuntimeError(f"Model loading failed: {exc}") from exc
 
     @property
     def is_loaded(self) -> bool:
-        return self._is_loaded and self._model is not None
+        return self._predictor.is_loaded
 
     @property
     def model_version(self) -> str:
-        return self._model_metadata.get("version", "unknown")
+        return self._predictor.version
 
     def predict(
         self,
@@ -121,13 +93,13 @@ class PredictionService:
             raise ModelNotLoadedException()
 
         try:
-            features, match_meta = self._extract_features(request, db_session)
+            feature_frame, match_meta = self._extract_features(request, db_session)
         except Exception as exc:
             logger.error("Feature extraction failed: %s", exc, exc_info=True)
             raise PredictionFailedException(reason=str(exc)) from exc
 
         try:
-            probs = self._run_inference(features)
+            features, probs = self._predictor.predict(feature_frame)
         except Exception as exc:
             logger.error("Model inference failed: %s", exc, exc_info=True)
             raise PredictionFailedException(reason=f"Inference error: {exc}") from exc
@@ -136,13 +108,13 @@ class PredictionService:
         key_features = self._build_key_features(features)
 
         feature_vector = None
-        if request.include_feature_breakdown and self._feature_names:
-            feature_vector = dict(zip(self._feature_names, features.flatten().tolist()))
+        if request.include_feature_breakdown and self._predictor.feature_names:
+            feature_vector = dict(zip(self._predictor.feature_names, features.flatten().tolist()))
 
         predicted_outcome = ["H", "D", "A"][int(np.argmax(probs))]
         confidence = float(np.max(probs))
 
-        return PredictResponse(
+        response = PredictResponse(
             match_id=match_meta.get("match_id"),
             home_team_id=match_meta["home_team_id"],
             away_team_id=match_meta["away_team_id"],
@@ -160,6 +132,30 @@ class PredictionService:
             key_features=key_features,
             feature_vector=feature_vector,
         )
+        if response.match_id is not None:
+            self._save_prediction(db_session, response)
+        return response
+
+    def _save_prediction(self, db_session, response: PredictResponse) -> None:
+        """Keep the first prediction for each fixture and model version."""
+        db_session.execute(text("""
+            INSERT INTO "Predictions" (
+                match_id, model_version, predicted_outcome,
+                home_win_prob, draw_prob, away_win_prob, confidence
+            ) VALUES (
+                :match_id, :model_version, :predicted_outcome,
+                :home_win_prob, :draw_prob, :away_win_prob, :confidence
+            )
+            ON CONFLICT (match_id, model_version) DO NOTHING
+        """), {
+            "match_id": response.match_id,
+            "model_version": response.model_version,
+            "predicted_outcome": response.predicted_outcome,
+            "home_win_prob": response.probabilities.home_win,
+            "draw_prob": response.probabilities.draw,
+            "away_win_prob": response.probabilities.away_win,
+            "confidence": response.confidence,
+        })
 
     def list_predictions(
         self,
@@ -170,20 +166,10 @@ class PredictionService:
         """
         List stored predictions from DB with pagination.
 
-        Falls back to an empty response if the Predictions table does not yet exist.
+        The schema is required to exist before the API starts serving requests.
         """
-        from sqlalchemy import text
-
         offset = (page - 1) * page_size
-        try:
-            count_row = db_session.execute(text('SELECT COUNT(*) FROM "Predictions"')).scalar()
-            total = int(count_row or 0)
-        except Exception:
-            # Table may not exist yet
-            return PagedResponse(
-                data=[],
-                pagination=Pagination(page=page, page_size=page_size, total=0, total_pages=0),
-            )
+        total = int(db_session.execute(text('SELECT COUNT(*) FROM "Predictions"')).scalar() or 0)
 
         if total == 0:
             return PagedResponse(
@@ -201,9 +187,11 @@ class PredictionService:
                 p.home_win_prob,
                 p.draw_prob,
                 p.away_win_prob,
-                p.actual_outcome,
-                p.was_correct,
-                p.created_at::text AS created_at
+                COALESCE(m.outcome::text, p.actual_outcome) AS actual_outcome,
+                CASE WHEN m.outcome IS NOT NULL
+                    THEN p.predicted_outcome = m.outcome::text
+                    ELSE p.was_correct END AS was_correct,
+                to_char(p.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at
             FROM "Predictions" p
             JOIN "Matches" m ON m.id = p.match_id
             JOIN "Teams" ht ON ht.id = m.home_team_id
@@ -242,20 +230,27 @@ class PredictionService:
         self,
         request: PredictRequest,
         db_session,
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Use FeatureExtractor to build feature vector from DB.
         Returns (feature_array shape [1, n_features], match_metadata dict).
         """
         from ml.features.feature_extractor import FeatureExtractor
 
-        extractor = FeatureExtractor(db_session)
+        training_config = self._predictor.metadata.get("training_config")
+        if training_config is None:
+            raise ValueError("Model artifact has no feature configuration")
+        extractor = FeatureExtractor(db_session, config=parse_ml_config(training_config))
 
         if request.match_id is not None:
+            meta = extractor.get_match_meta(request.match_id)
+            if not meta:
+                raise ValueError(f"Match {request.match_id} does not exist.")
+            if meta.get("status") != "SCHEDULED" or meta["match_datetime"] <= datetime.now(timezone.utc):
+                raise ValueError("Predictions are only available before scheduled matches begin.")
             df = extractor.extract_for_match(request.match_id)
             if df is None or df.empty:
                 raise ValueError(f"No features found for match_id={request.match_id}")
-            meta = extractor.get_match_meta(request.match_id)
         else:
             df, meta = extractor.extract_for_fixture(
                 home_team_id=request.home_team_id,
@@ -265,35 +260,14 @@ class PredictionService:
                 match_week=request.match_week,
             )
 
-        # Select only columns the model was trained on
-        if self._feature_names:
-            available = [c for c in self._feature_names if c in df.columns]
-            missing = [c for c in self._feature_names if c not in df.columns]
-            if missing:
-                logger.warning("Missing features (will be zero-filled): %s", missing)
-                for col in missing:
-                    df[col] = 0.0
-            df = df[self._feature_names]
-
-        return df.values.astype(np.float32), meta
-
-    def _run_inference(self, features: np.ndarray) -> np.ndarray:
-        """
-        Run model.predict_proba() and return [P(H), P(D), P(A)] array.
-        Handles both pipeline and raw model formats.
-        """
-        probs = self._model.predict_proba(features)
-        # Ensure shape is (1, 3) - some ensembles return (3,) for single sample
-        if probs.ndim == 1:
-            probs = probs.reshape(1, -1)
-        return probs[0]
+        return df, meta
 
     def _build_key_features(self, features: np.ndarray) -> Optional[KeyFeatures]:
         """Build KeyFeatures from feature vector using known column positions."""
-        if not self._feature_names:
+        if not self._predictor.feature_names:
             return None
         try:
-            idx = {name: i for i, name in enumerate(self._feature_names)}
+            idx = {name: i for i, name in enumerate(self._predictor.feature_names)}
             flat = features.flatten()
 
             def _get(col: str) -> Optional[float]:
