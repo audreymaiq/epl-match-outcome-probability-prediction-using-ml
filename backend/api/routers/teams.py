@@ -28,7 +28,7 @@ def list_teams(
 ):
     svc = TeamService(db)
     items, total = svc.list_teams(search=search, page=page, page_size=page_size)
-    total_pages = max(1, -(-total // page_size))
+    total_pages = -(-total // page_size)
     return PagedResponse(
         data=items,
         pagination=Pagination(page=page, page_size=page_size, total=total, total_pages=total_pages),
