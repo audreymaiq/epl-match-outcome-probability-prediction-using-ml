@@ -32,10 +32,11 @@ pipeline: ## Run ELT pipeline (fetch match data)
 	docker compose --profile pipeline run --rm pipeline
 
 features: ## Compute all ML features
-	docker compose exec api python -m feature_pipeline.orchestrator
+	docker compose --profile pipeline run --rm features
 
 train: ## Train the ensemble model (walk-forward CV)
-	docker compose exec api python -m ml.training.train
+	docker compose --profile training run --rm train
+	docker compose restart api
 
 # ── Development ───────────────────────────────────────────────────────────────
 
@@ -43,21 +44,21 @@ train: ## Train the ensemble model (walk-forward CV)
 
 test: test-backend test-frontend ## Run all tests
 
-test-backend: ## Run backend Python tests (60 tests)
+test-backend: ## Run backend Python tests
 	cd backend && PYTHONPATH=. python -m pytest tests/ -v
 
 test-frontend: ## Type-check and build frontend
-	cd frontend && npx next build
+	cd frontend && npm run build
 
 lint: ## Lint backend code
-	cd backend && python -m flake8 api/ ml/ feature_pipeline/ providers/ --max-line-length 120
+	cd backend && python -m flake8 api/ ml/ providers/ --max-line-length 120
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
 .PHONY: db-shell db-reset
 
 db-shell: ## Open psql shell
-	docker compose exec postgres psql -U $${DB_USER:-epl_user} -d $${DB_NAME:-epl_db}
+	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
 db-reset: ## Reset database (DESTRUCTIVE)
 	docker compose down -v
