@@ -335,8 +335,13 @@ class SofaScoreExtractor:
                 logger.error(f"Circuit Breaker is open. Aborting request to {url}. Error: {e}")
                 return None
             except RequestsError as e:
+                status_code = getattr(getattr(e, "response", None), "status_code", None)
+                if status_code is not None and 400 <= status_code < 500 and status_code != 429:
+                    raise RuntimeError(
+                        f"SofaScore rejected the request with HTTP {status_code}: {url}"
+                    ) from e
                 if attempt == max_retries - 1:
-                    logger.error("Max retries exceeded for request.", extra={"url": url, "error": str(e)})
+                    logger.error("SofaScore request failed after %d attempts: %s", max_retries, e)
                     return None
                 delay = (self._request_interval * (backoff_factor ** attempt))
                 time.sleep(delay)
