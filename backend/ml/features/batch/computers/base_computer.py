@@ -1,4 +1,3 @@
-# feature_pipeline/computers/base_computer.py
 """
 Abstract base for all feature computers.
 
