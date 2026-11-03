@@ -1,9 +1,8 @@
-# feature_pipeline/computers/elo_computer.py
 """
 ELO Computer - pipeline adapter for ml/elo/elo_builder.py.
 
 Delegates actual ELO computation to the ml layer.
-This keeps feature_pipeline/ as a thin orchestration layer.
+This keeps ml.features.batch/ as a thin orchestration layer.
 """
 
 import logging
@@ -11,7 +10,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from feature_pipeline.computers.base_computer import AbstractFeatureComputer
+from ml.features.batch.computers.base_computer import AbstractFeatureComputer
 from ml.elo.elo_builder import EloBuilder
 
 logger = logging.getLogger(__name__)
