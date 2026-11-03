@@ -76,6 +76,15 @@ class AbstractDataProvider(ABC):
     def name(self) -> str:
         """Unique identifier for this provider, e.g. 'sofascore'."""
 
+    @property
+    @abstractmethod
+    def tournament_id(self) -> int:
+        """Provider-specific EPL tournament identifier."""
+
+    @abstractmethod
+    def list_seasons(self) -> List[tuple[str, int]]:
+        """Available (canonical season name, provider season ID) pairs, newest first."""
+
     @abstractmethod
     def fetch_season_matches(
         self,
