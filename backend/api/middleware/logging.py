@@ -2,7 +2,7 @@
 """
 Request/response structured logging middleware.
 Logs method, path, status, duration for every request.
-Compatible with structlog for JSON log output in production.
+Adds request context to application logs.
 """
 
 import time
