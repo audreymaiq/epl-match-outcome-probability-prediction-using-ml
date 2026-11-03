@@ -4,7 +4,7 @@
 #
 # Used for both:
 #   - ELT pipeline: python -m elt_pipeline.orchestrator
-#   - Feature pipeline: python -m feature_pipeline.orchestrator
+#   - Feature pipeline: python -m ml.features.batch.orchestrator
 #   - Training: python -m ml.training.train
 #
 # Run via Docker Compose profiles:
@@ -46,5 +46,5 @@ USER appuser
 
 # Default: run ELT pipeline with sofascore provider.
 # Override CMD via docker-compose to run feature pipeline or training.
-CMD ["python", "-m", "elt_pipeline.orchestrator", "--provider", "sofascore", "--log-level", "INFO"]
+CMD ["python", "-m", "elt_pipeline.orchestrator", "--log-level", "INFO"]
 
