@@ -2,9 +2,9 @@
 
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { useMatch, usePredict } from '@/lib/hooks'
 import { ProbabilityBars } from '@/components/probability-bars'
-import { PageHeading } from '@/components/page-heading'
 import { TeamMark } from '@/components/team-mark'
 import { ArrowLeft, MapPin, UserRound, UsersRound } from 'lucide-react'
 
@@ -17,13 +17,24 @@ export default function MatchDetailPage() {
   const matchId = Number(params.id)
   const { data: match, isLoading, isError } = useMatch(matchId)
   const prediction = usePredict()
+  const [currentTime, setCurrentTime] = useState<number | null>(null)
+
+  useEffect(() => {
+    const updateTime = () => setCurrentTime(Date.now())
+    const initialUpdate = window.setTimeout(updateTime, 0)
+    const interval = window.setInterval(updateTime, 60_000)
+    return () => {
+      window.clearTimeout(initialUpdate)
+      window.clearInterval(interval)
+    }
+  }, [])
 
   if (isLoading) return <main className="page-frame space-y-4 py-12"><div className="surface-quiet h-56 animate-pulse" /><div className="surface-quiet h-64 animate-pulse" /></main>
   if (isError || !match) return <main className="page-frame py-16 text-center"><p className="text-lg font-bold text-white">Match could not be found</p><p className="mt-2 text-sm text-[var(--muted)]">The fixture may have been removed or the match service is unavailable.</p><Link className="button-secondary mt-5" href="/matches"><ArrowLeft size={14} /> Back to fixtures</Link></main>
 
   const finished = match.status === 'FINISHED'
   const matchDate = new Date(match.match_datetime)
-  const canPredict = match.status === 'SCHEDULED' && matchDate.getTime() > Date.now()
+  const canPredict = match.status === 'SCHEDULED' && currentTime !== null && matchDate.getTime() > currentTime
   return (
     <main className="page-frame pb-16 pt-8 sm:pt-12">
       <Link href="/matches" className="mb-6 inline-flex items-center gap-2 text-xs font-semibold text-[var(--muted)] transition hover:text-white"><ArrowLeft size={14} /> All fixtures</Link>
