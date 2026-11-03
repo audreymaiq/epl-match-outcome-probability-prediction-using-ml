@@ -33,6 +33,8 @@ class FeatureExtractor:
         self._config = config or load_ml_config()
         self._defaults = self._config.features.defaults
         self._elo_config = EloConfig(**self._config.elo)
+        self._derbies = frozenset(frozenset(pair) for pair in self._config.features.derbies)
+        self._top_teams = frozenset(self._config.features.top_teams)
 
     # ── Public entry points ───────────────────────────────────────────────────
 
@@ -233,7 +235,7 @@ class FeatureExtractor:
     ) -> Dict[str, Any]:
         """
         Pre-match ELO ratings - fetched from EloRatings table.
-        Falls back to 1500 for teams with no history.
+        Uses the configured prior for teams with no history.
         """
         def rating_before_match(team_id: int) -> float:
             latest = self._get_latest_elo(team_id, dt)
@@ -249,10 +251,10 @@ class FeatureExtractor:
         elo_diff = home_elo - away_elo
 
         # Logistic win probability (ELO standard)
-        elo_win_prob_home = 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
+        elo_win_prob_home = 1.0 / (1.0 + 10.0 ** (-elo_diff / self._elo_config.rating_scale))
         # Apply the configured home advantage in Elo points.
         elo_win_prob_home_adj = 1.0 / (
-            1.0 + 10.0 ** (-(elo_diff + self._elo_config.home_advantage) / 400.0)
+            1.0 + 10.0 ** (-(elo_diff + self._elo_config.home_advantage) / self._elo_config.rating_scale)
         )
 
         return {
@@ -555,8 +557,8 @@ class FeatureExtractor:
                 "h2h_away_win_rate":   1 - self._defaults["h2h_home_win_rate"] - self._defaults["h2h_draw_rate"],
                 "h2h_avg_home_goals":  self._defaults["form5_avg_scored"],
                 "h2h_avg_away_goals":  self._defaults["form5_avg_scored"],
-                "h2h_over_2_5_rate":   0.53,
-                "h2h_btts_rate":       0.48,
+                "h2h_over_2_5_rate":   self._config.features.h2h_over_2_5_prior,
+                "h2h_btts_rate":       self._config.features.h2h_btts_prior,
                 "h2h_home_dominance":  0.0,
                 "h2h_recent_trend":    0.0,
             }
@@ -678,7 +680,7 @@ class FeatureExtractor:
         away_atk, away_def_weakness = _team_strength(away_id)
 
         # Expected goals (Dixon-Coles style)
-        home_xg = home_atk * away_def_weakness * lg_avg * 1.1  # +10% home advantage
+        home_xg = home_atk * away_def_weakness * lg_avg * self._config.features.expected_home_goals_multiplier
         away_xg = away_atk * home_def_weakness * lg_avg
 
         return {
@@ -756,7 +758,7 @@ class FeatureExtractor:
                 "referee_home_win_rate":  self._defaults["referee_home_win_rate"],
                 "referee_draw_rate":      self._defaults["referee_draw_rate"],
                 "referee_avg_yellows":    self._defaults["referee_avg_yellows"],
-                "referee_avg_reds":       0.1,
+                "referee_avg_reds":       self._config.features.referee_avg_reds_prior,
                 "referee_cards_tendency": 0.0,
             }
 
@@ -789,19 +791,19 @@ class FeatureExtractor:
                 "referee_home_win_rate":  self._defaults["referee_home_win_rate"],
                 "referee_draw_rate":      self._defaults["referee_draw_rate"],
                 "referee_avg_yellows":    self._defaults["referee_avg_yellows"],
-                "referee_avg_reds":       0.1,
+                "referee_avg_reds":       self._config.features.referee_avg_reds_prior,
                 "referee_cards_tendency": 0.0,
             }
 
         avg_yc = float(row.avg_yc or self._defaults["referee_avg_yellows"])
-        cards_tendency = (avg_yc - self._defaults["referee_avg_yellows"]) / 1.5
+        cards_tendency = (avg_yc - self._defaults["referee_avg_yellows"]) / self._config.features.referee_cards_scale
 
         return {
             "referee_games":          games,
             "referee_home_win_rate":  float(row.hw_rate or self._defaults["referee_home_win_rate"]),
             "referee_draw_rate":      float(row.draw_rate or self._defaults["referee_draw_rate"]),
             "referee_avg_yellows":    avg_yc,
-            "referee_avg_reds":       float(row.avg_rc or 0.1),
+            "referee_avg_reds":       float(row.avg_rc or self._config.features.referee_avg_reds_prior),
             "referee_cards_tendency": round(cards_tendency, 4),
         }
 
@@ -827,7 +829,7 @@ class FeatureExtractor:
                 if last.tzinfo is None and match_dt.tzinfo is not None:
                     last = last.replace(tzinfo=timezone.utc)
             diff = (match_dt - last).total_seconds() / 86400.0
-            return round(max(1.0, min(diff, 30.0)), 2)
+            return round(max(1.0, min(diff, self._config.features.rest_days_max)), 2)
 
         home_rest = _days_since_last(home_id)
         away_rest = _days_since_last(away_id)
@@ -931,37 +933,13 @@ class FeatureExtractor:
 
     # ── TIER 3: Derby / rivalry ───────────────────────────────────────────────
 
-    # EPL derbies: pairs of team names (canonical, normalized)
-    _EPL_DERBIES = frozenset([
-        frozenset(["Manchester United", "Manchester City"]),   # Manchester Derby
-        frozenset(["Arsenal", "Tottenham Hotspur"]),           # North London Derby
-        frozenset(["Liverpool", "Everton"]),                   # Merseyside Derby
-        frozenset(["Chelsea", "Arsenal"]),                     # London Derby
-        frozenset(["Chelsea", "Tottenham Hotspur"]),           # London Derby
-        frozenset(["West Ham United", "Tottenham Hotspur"]),   # East London Derby
-        frozenset(["Newcastle United", "Sunderland"]),         # Tyne-Wear Derby
-        frozenset(["Aston Villa", "Birmingham City"]),         # Second City Derby
-        frozenset(["Sheffield United", "Sheffield Wednesday"]),# Steel City Derby
-        frozenset(["Leicester City", "Nottingham Forest"]),    # East Midlands Derby
-        frozenset(["Leeds United", "Manchester United"]),      # Rose Derby
-        frozenset(["Brentford", "Fulham"]),                    # West London Derby
-        frozenset(["Crystal Palace", "Brighton"]),             # M23 / A23 Derby
-        frozenset(["Liverpool", "Manchester United"]),         # North West Derby (biggest)
-    ])
-
-    # Top-6 pairs: these matches are statistically different (more draws, lower-scoring)
-    _EPL_TOP_6 = frozenset([
-        "Manchester City", "Manchester United", "Arsenal",
-        "Liverpool", "Chelsea", "Tottenham Hotspur",
-    ])
-
     def _features_derby(self, home_id: int, away_id: int) -> Dict[str, Any]:
         """Flag if this is a local derby / high-rivalry fixture or top-6 clash."""
         home_name = self._get_team_name(home_id)
         away_name = self._get_team_name(away_id)
         pair = frozenset([home_name, away_name])
-        is_derby = int(pair in self._EPL_DERBIES)
-        is_top6_clash = int(home_name in self._EPL_TOP_6 and away_name in self._EPL_TOP_6)
+        is_derby = int(pair in self._derbies)
+        is_top6_clash = int(home_name in self._top_teams and away_name in self._top_teams)
         return {
             "is_derby": is_derby,
             "is_top6_clash": is_top6_clash,
@@ -1143,7 +1121,7 @@ class FeatureExtractor:
         # Blend of ELO + form + season into single team strength metric
         elo_diff = elo_feats.get("elo_diff", 0.0)
         # Normalise ELO diff to ~0-1 scale for blending
-        elo_norm = elo_diff / 400.0  # 400 pts ≈ 10:1 odds
+        elo_norm = elo_diff / self._elo_config.rating_scale
         form_norm = (h_ppg5 - a_ppg5) / 3.0  # max PPG diff ≈ 3
         season_norm = (h_sppg - a_sppg) / 3.0
         derived["composite_power_rating"] = round(
