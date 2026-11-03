@@ -2,7 +2,7 @@
 """Prediction request/response schemas."""
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional, List
 from pydantic import BaseModel, Field, model_validator
 
@@ -16,14 +16,17 @@ class PredictRequest(BaseModel):
     """
     match_id: Optional[int] = Field(
         default=None,
+        ge=1,
         description="Internal match ID from /api/v1/matches. Use for upcoming fixtures already in DB.",
     )
     home_team_id: Optional[int] = Field(
         default=None,
+        ge=1,
         description="Internal team ID. Required if match_id is not provided.",
     )
     away_team_id: Optional[int] = Field(
         default=None,
+        ge=1,
         description="Internal team ID. Required if match_id is not provided.",
     )
     match_datetime: Optional[str] = Field(
@@ -49,7 +52,13 @@ class PredictRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_inputs(self) -> "PredictRequest":
-        if self.match_id is None:
+        if self.match_id is not None:
+            if any(value is not None for value in (
+                self.home_team_id, self.away_team_id, self.match_datetime,
+                self.season_name, self.match_week,
+            )):
+                raise ValueError("Provide match_id or custom fixture fields, not both.")
+        else:
             if self.home_team_id is None or self.away_team_id is None:
                 raise ValueError(
                     "Provide either 'match_id' or both 'home_team_id' and 'away_team_id'."
@@ -59,9 +68,13 @@ class PredictRequest(BaseModel):
             if not self.match_datetime:
                 raise ValueError("match_datetime is required for a custom fixture.")
             try:
-                datetime.fromisoformat(self.match_datetime.replace("Z", "+00:00"))
+                kickoff = datetime.fromisoformat(self.match_datetime.replace("Z", "+00:00"))
             except ValueError as exc:
                 raise ValueError("match_datetime must be a valid ISO 8601 datetime.") from exc
+            if kickoff.tzinfo is None or kickoff.utcoffset() is None:
+                raise ValueError("match_datetime must include a timezone offset.")
+            if kickoff <= datetime.now(timezone.utc):
+                raise ValueError("match_datetime must be in the future.")
             if not self.season_name:
                 raise ValueError("season_name is required for a custom fixture.")
             if self.match_week is None:
