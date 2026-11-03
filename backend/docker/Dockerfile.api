@@ -24,10 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (layer caching - rebuild only when reqs change)
-COPY requirements.txt .
+COPY requirements-api.txt .
 
 # Install into a prefix dir (clean copy to runtime stage)
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r requirements-api.txt
 
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
