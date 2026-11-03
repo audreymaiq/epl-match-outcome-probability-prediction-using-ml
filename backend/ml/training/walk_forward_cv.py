@@ -1,30 +1,5 @@
 # ml/training/walk_forward_cv.py
-"""
-Walk-Forward Cross-Validation for Time-Series Football Data.
-
-WHY NOT K-FOLD:
-  Football match outcomes are a time series.
-  Random K-fold creates data leakage: future matches used to predict past.
-  Walk-forward CV (expanding window) is the ONLY valid approach.
-
-SCHEME:
-  - Training window: all matches from the beginning up to fold cutoff
-  - Test window: next N matches after training cutoff
-  - Folds advance chronologically, never backward
-
-EPL-SPECIFIC DECISIONS:
-  - Minimum training seasons: 3 (need enough H2H, form history)
-  - Test window: 1 full season (~380 matches / 38 rounds × 20 teams / 2)
-  - Evaluate every round; prior-season history and explicit fallbacks support early-season fixtures
-  - Evaluate per season AND per fold
-
-OUTPUT METRICS (per fold and aggregate):
-  - Accuracy (3-way: H/D/A)
-  - Log-loss (lower = better calibration)
-  - Brier score (probability calibration)
-  - Per-class precision/recall (especially for Draw - hardest to predict)
-  - ROI simulation vs naive home-win strategy
-"""
+"""Expanding season splits for out of time match outcome evaluation."""
 
 from __future__ import annotations
 
@@ -41,6 +16,8 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     confusion_matrix,
 )
+from sklearn.base import clone
+from ml.models.ensemble import StackingEnsemble
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +49,7 @@ class FoldResult:
     # Calibration
     expected_calibration_error: float = 0.0
 
-    # Betting simulation
-    roi_vs_home_always: float = 0.0   # % gain over naive "always home" strategy
+    accuracy_gap_vs_home_always: float = 0.0
 
 
 @dataclass
@@ -156,10 +132,14 @@ class WalkForwardCV:
         n_test_seasons: int = 1,
         min_train_seasons: int = 2,
         gap_rounds: int = 0,
+        min_train_matches: int = 100,
+        min_test_matches: int = 20,
     ):
         self._n_test = n_test_seasons
         self._min_train = min_train_seasons
         self._gap_rounds = gap_rounds
+        self._min_train_matches = min_train_matches
+        self._min_test_matches = min_test_matches
 
     def split(
         self,
@@ -193,7 +173,7 @@ class WalkForwardCV:
                 (df.get("match_week", pd.Series(99, index=df.index)).fillna(99).astype(int) > self._gap_rounds)
             ].index.tolist()
 
-            if len(train_idx) < 100 or len(test_idx) < 20:
+            if len(train_idx) < self._min_train_matches or len(test_idx) < self._min_test_matches:
                 continue
 
             splits.append((np.array(train_idx), np.array(test_idx)))
@@ -235,11 +215,11 @@ class WalkForwardCV:
         cv_result = CVResult(n_folds=len(splits))
 
         for fold_i, (train_idx, test_idx) in enumerate(splits):
-            X_train = df.loc[train_idx, feature_cols].fillna(0).values
+            X_train = df.loc[train_idx, feature_cols].values.astype(np.float32)
             y_train_raw = df.loc[train_idx, target_col].values
             y_train = np.array([label_map[y] for y in y_train_raw])
 
-            X_test = df.loc[test_idx, feature_cols].fillna(0).values
+            X_test = df.loc[test_idx, feature_cols].values.astype(np.float32)
             y_test_raw = df.loc[test_idx, target_col].values
             y_test = np.array([label_map[y] for y in y_test_raw if y in label_map])
 
@@ -250,17 +230,16 @@ class WalkForwardCV:
             test_mask = np.array([y in label_map for y in y_test_raw])
             X_test = X_test[test_mask]
 
-            # Train class weights - upweight Draw (hardest to predict)
-            class_weights = {0: 1.0, 1: 1.8, 2: 1.0}
-            sample_weights = np.array([class_weights[y] for y in y_train])
-
             try:
-                model.fit(X_train, y_train, sample_weight=sample_weights)
-                y_proba = model.predict_proba(X_test)
+                fold_model = model() if callable(model) and not hasattr(model, "fit") else clone(model)
+                if isinstance(fold_model, StackingEnsemble):
+                    fold_model.fit(X_train, y_train, timestamps=df.loc[train_idx, date_col].to_numpy())
+                else:
+                    fold_model.fit(X_train, y_train)
+                y_proba = fold_model.predict_proba(X_test)
                 y_pred  = np.argmax(y_proba, axis=1)
             except Exception as exc:
-                logger.error("Fold %d training/prediction failed: %s", fold_i, exc)
-                continue
+                raise RuntimeError(f"Walk forward fold {fold_i} failed") from exc
 
             # Metrics
             acc    = accuracy_score(y_test, y_pred)
@@ -280,12 +259,11 @@ class WalkForwardCV:
             # ECE (Expected Calibration Error) - 10 bins
             ece = self._expected_calibration_error(y_test, y_proba)
 
-            # ROI vs "always pick home" strategy
+            # Accuracy gap against a fixed home-win classifier; odds are not available.
             home_acc = np.mean(y_test == 0)
-            roi = acc - home_acc
+            accuracy_gap = acc - home_acc
 
             # Determine train/test seasons for this fold
-            train_mask_bool = np.isin(np.arange(len(df)), train_idx)
             train_seasons_list = sorted(df.loc[train_idx, season_col].unique().tolist())
             test_season = df.loc[test_idx, season_col].iloc[0] if len(test_idx) > 0 else "unknown"
 
@@ -303,7 +281,7 @@ class WalkForwardCV:
                 f1_per_class={reverse_map[i]: round(float(f1[i]), 4) for i in range(3)},
                 confusion_matrix=cm,
                 expected_calibration_error=round(ece, 4),
-                roi_vs_home_always=round(roi, 4),
+                accuracy_gap_vs_home_always=round(accuracy_gap, 4),
             )
             cv_result.folds.append(fold_result)
 
@@ -334,7 +312,7 @@ class WalkForwardCV:
             is_cls    = (y_true == cls).astype(float)
             bins = np.linspace(0, 1, n_bins + 1)
             for b in range(n_bins):
-                mask = (probs_cls >= bins[b]) & (probs_cls < bins[b + 1])
+                mask = (probs_cls >= bins[b]) & (probs_cls <= bins[b + 1] if b == n_bins - 1 else probs_cls < bins[b + 1])
                 if mask.sum() == 0:
                     continue
                 avg_conf = probs_cls[mask].mean()
@@ -359,7 +337,7 @@ def compute_metrics(
     label_map = {name: i for i, name in enumerate(label_names)}
 
     acc   = accuracy_score(y_true, y_pred)
-    ll    = log_loss(y_true, y_proba)
+    ll    = log_loss(y_true, y_proba, labels=list(range(len(label_names))))
     brier = float(np.mean([
         brier_score_loss((y_true == c).astype(int), y_proba[:, c])
         for c in range(len(label_names))
