@@ -37,6 +37,9 @@ export const getPredictions = (params?: { page?: number; page_size?: number }) =
 export const getMatches = (params?: MatchesParams) =>
   api.get<PagedResponse<MatchListItem>>('/api/v1/matches', { params })
 
+export const getSeasons = () =>
+  api.get<string[]>('/api/v1/matches/seasons')
+
 /** GET /api/v1/matches/:id - Match detail */
 export const getMatch = (id: number) =>
   api.get<MatchDetail>(`/api/v1/matches/${id}`)
