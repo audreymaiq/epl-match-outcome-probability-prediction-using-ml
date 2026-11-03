@@ -46,6 +46,8 @@ class MatchService:
         if status:
             filters.append("m.status = :status")
             params["status"] = status.upper()
+            if status.upper() == "SCHEDULED":
+                filters.append("m.match_datetime > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')")
         if team_id is not None:
             filters.append("(m.home_team_id = :team_id OR m.away_team_id = :team_id)")
             params["team_id"] = team_id
@@ -57,7 +59,7 @@ class MatchService:
         sql = f"""
             SELECT
                 m.id, s.name AS season_name,
-                m.match_datetime::text, m.match_week,
+                to_char(m.match_datetime, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS match_datetime, m.match_week,
                 m.status, m.outcome,
                 m.home_goals, m.away_goals,
                 ht.id AS ht_id, ht.name AS ht_name, ht.logo_url AS ht_logo,
@@ -101,7 +103,7 @@ class MatchService:
         sql = """
             SELECT
                 m.id, s.name AS season_name,
-                m.match_datetime::text, m.match_week,
+                to_char(m.match_datetime, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS match_datetime, m.match_week,
                 m.status, m.outcome,
                 m.home_goals, m.away_goals,
                 m.half_time_home_goals, m.half_time_away_goals,
