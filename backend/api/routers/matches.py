@@ -4,6 +4,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from api.dependencies import get_db
 from api.services.match_service import MatchService
@@ -11,6 +12,12 @@ from api.schemas.match import MatchListItem, MatchDetail
 from api.schemas.common import PagedResponse, Pagination
 
 router = APIRouter(prefix="/matches", tags=["Matches"])
+
+
+@router.get("/seasons", response_model=list[str], summary="Available seasons")
+def list_seasons(db: Session = Depends(get_db)) -> list[str]:
+    rows = db.execute(text('SELECT name FROM "Seasons" ORDER BY start_year DESC')).scalars()
+    return list(rows)
 
 
 @router.get(
