@@ -1,4 +1,3 @@
-# feature_pipeline/orchestrator.py
 """
 Feature Pipeline Orchestrator.
 
@@ -11,13 +10,13 @@ Runs all feature computers in dependency order:
 
 Usage:
     # Compute everything:
-    python -m feature_pipeline.orchestrator
+    python -m ml.features.batch.orchestrator
 
     # Incremental (one season):
-    python -m feature_pipeline.orchestrator --season "2023/24"
+    python -m ml.features.batch.orchestrator --season "2023/24"
 
     # Skip ELO (expensive, rerun separately):
-    python -m feature_pipeline.orchestrator --skip elo
+    python -m ml.features.batch.orchestrator --skip elo
 """
 
 import sys
@@ -28,14 +27,14 @@ from typing import Optional, List
 
 from utils.db_connector import DatabaseConnector
 from utils.logging_config import setup_logging
-from feature_pipeline.computers import (
+from ml.features.batch.computers import (
     EloComputer,
     FormComputer,
     H2HComputer,
     RefereeComputer,
     SeasonComputer,
 )
-from feature_pipeline.computers.base_computer import AbstractFeatureComputer, ComputerError
+from ml.features.batch.computers.base_computer import AbstractFeatureComputer, ComputerError
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +104,7 @@ def run_feature_pipeline(
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Feature Pipeline - compute all aggregated ML features from raw match data.",
-        epilog='Example: python -m feature_pipeline.orchestrator --season "2023/24"',
+        epilog='Example: python -m ml.features.batch.orchestrator --season "2023/24"',
     )
     parser.add_argument("--season", default=None, metavar="SEASON",
                         help='Limit to one season, e.g. "2023/24". Default: all seasons.')
