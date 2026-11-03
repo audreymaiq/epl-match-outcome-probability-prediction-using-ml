@@ -34,9 +34,10 @@ def model_info(
 )
 def model_performance(
     db: Session = Depends(get_db),
+    svc: PredictionService = Depends(get_prediction_svc),
 ) -> Dict[str, Any]:
     model_svc = ModelService()
-    return model_svc.get_performance(db)
+    return model_svc.get_performance(db, svc.model_version if svc.is_loaded else None)
 
 
 @router.get(
