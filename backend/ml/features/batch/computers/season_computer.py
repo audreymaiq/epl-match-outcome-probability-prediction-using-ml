@@ -1,4 +1,3 @@
-# feature_pipeline/computers/season_computer.py
 """
 Team Season Location Stats Computer.
 
@@ -21,7 +20,7 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from feature_pipeline.computers.base_computer import AbstractFeatureComputer
+from ml.features.batch.computers.base_computer import AbstractFeatureComputer
 
 logger = logging.getLogger(__name__)
 
