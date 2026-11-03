@@ -568,6 +568,7 @@ class SofaScoreEndpoints(Enum):
     MATCH_LINEUPS = "/event/{match_id}/lineups"  
     MATCH_STATISTICS = "/event/{match_id}/statistics"
     MATCH_INCIDENTS = "/event/{match_id}/incidents"
+    TOURNAMENT_SEASONS = "/unique-tournament/{tournament_id}/seasons"
     
     # === Season-specific Endpoints ===
     SEASON_STANDINGS = "/unique-tournament/{tournament_id}/season/{season_id}/standings/total"
