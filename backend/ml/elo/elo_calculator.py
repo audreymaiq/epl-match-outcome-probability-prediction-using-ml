@@ -40,6 +40,7 @@ import math
 import logging
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
+from ml.config import load_ml_config
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class EloConfig:
 
 
 # Singleton default config
-DEFAULT_CONFIG = EloConfig()
+DEFAULT_CONFIG = EloConfig(**load_ml_config().elo)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
