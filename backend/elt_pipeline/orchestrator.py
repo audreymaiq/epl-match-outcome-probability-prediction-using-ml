@@ -236,44 +236,52 @@ def run_pipeline(
     signal.signal(signal.SIGINT, _shutdown_handler)
     signal.signal(signal.SIGTERM, _shutdown_handler)
 
-    if not DatabaseConnector.check_connection():
-        logger.critical("DB connection failed. Aborting pipeline.")
-        return result
-
-    # Resolve seasons to process
-    all_seasons = provider.list_seasons()
-    if specific_seasons:
-        requested = set(specific_seasons)
-        seasons = [season for season in all_seasons if season[0] in requested or
-                   f"{season[0][:4]}/{season[0][-2:]}" in requested]
-    else:
-        seasons = all_seasons[:config.seasons.seasons_to_fetch]
-
-    if not seasons:
-        logger.warning("No seasons to process.")
-        result["success"] = True
-        return result
-
-    result["total_seasons"] = len(seasons)
-    tournament_id = provider.tournament_id
-
-    for season_name, season_id in seasons:
-        sr = orchestrator.process_season(tournament_id, season_id, season_name)
-        result["season_results"].append(sr)
-        result["total_matches"] += sr["total"]
-        result["successful_matches"] += sr["success"]
-        if sr["success"] > 0:
-            result["successful_seasons"] += 1
-
-    result["success"] = result["successful_seasons"] > 0
-    result["duration_seconds"] = (datetime.now() - t_start).total_seconds()
-
     try:
-        provider.close()
-    except Exception:
-        pass
+        if not DatabaseConnector.check_connection():
+            logger.critical("DB connection failed. Aborting pipeline.")
+            return result
 
-    return result
+        all_seasons = provider.list_seasons()
+        if specific_seasons:
+            requested = set(specific_seasons)
+            recognized = {name for name, _ in all_seasons}
+            recognized.update(f"{name[:4]}/{name[-2:]}" for name, _ in all_seasons)
+            unknown = requested - recognized
+            if unknown:
+                logger.error("Requested seasons not available: %s", ", ".join(sorted(unknown)))
+                return result
+            seasons = [season for season in all_seasons if season[0] in requested or
+                       f"{season[0][:4]}/{season[0][-2:]}" in requested]
+        else:
+            seasons = all_seasons[:config.seasons.seasons_to_fetch]
+
+        if not seasons:
+            logger.error("No seasons to process.")
+            return result
+
+        result["total_seasons"] = len(seasons)
+        tournament_id = provider.tournament_id
+
+        for season_name, season_id in seasons:
+            sr = orchestrator.process_season(tournament_id, season_id, season_name)
+            result["season_results"].append(sr)
+            result["total_matches"] += sr["total"]
+            result["successful_matches"] += sr["success"]
+            if sr["success"] > 0:
+                result["successful_seasons"] += 1
+
+        result["success"] = (
+            result["total_matches"] > 0
+            and result["successful_matches"] == result["total_matches"]
+            and result["successful_seasons"] == result["total_seasons"]
+        )
+        return result
+    finally:
+        result["duration_seconds"] = (datetime.now() - t_start).total_seconds()
+        try:
+            provider.close()
+        except Exception as exc:
+            logger.warning("Failed to close provider '%s': %s", provider_name, exc)
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
