@@ -2,7 +2,7 @@
 
 from pydantic import AliasChoices, Field, AnyUrl, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional
 from pathlib import Path
 import os
 import logging
@@ -10,8 +10,6 @@ import urllib.parse
 import random
 
 ENV_FILE_PATH = (Path(__file__).parent.parent / ".env").resolve()
-if not ENV_FILE_PATH.exists():
-    logging.warning(f".env file not found at {ENV_FILE_PATH}. Using default values or environment variables.")
     
 class DatabaseSettings(BaseSettings):
     """Cấu hình database với validation an toàn"""
@@ -285,13 +283,31 @@ class SofascoreSettings(BaseSettings):
 
     @property
     def is_configured(self) -> bool:
-        """Kiểm tra scraping config có hợp lệ không"""
-        return (
-            self.request_timeout > 0 and 
-            self.max_retries >= 1 and 
-            self.concurrent_requests >= 1 and
-            self.random_delay_range[0] < self.random_delay_range[1]
-        )
+        return bool(self.base_url and self.web_base_url and self.premier_league_id > 0)
+
+
+class ScrapingSettings(BaseSettings):
+    """Network and pacing options shared by data providers."""
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE_PATH), env_file_encoding="utf-8", extra="ignore"
+    )
+
+    connect_timeout: int = Field(default=15, validation_alias="SCRAPING_CONNECT_TIMEOUT", gt=0)
+    read_timeout: int = Field(default=30, validation_alias="SCRAPING_READ_TIMEOUT", gt=0)
+    max_retries: int = Field(default=5, validation_alias="SCRAPING_MAX_RETRIES", ge=1)
+    backoff_factor: float = Field(default=2.5, validation_alias="SCRAPING_BACKOFF_FACTOR", ge=1)
+    browser_impersonate: str = Field(default="chrome110", validation_alias="SCRAPING_BROWSER_IMPERSONATE")
+    ignore_ssl_errors: bool = Field(default=False, validation_alias="SCRAPING_IGNORE_SSL")
+    min_delay: float = Field(default=1.0, validation_alias="SCRAPING_MIN_DELAY", ge=0)
+    max_delay: float = Field(default=3.0, validation_alias="SCRAPING_MAX_DELAY", gt=0)
+
+    @property
+    def is_configured(self) -> bool:
+        return self.min_delay < self.max_delay
+
+    def get_random_delay(self) -> float:
+        return random.uniform(self.min_delay, self.max_delay)
 
 class SeasonSettings(BaseSettings):
     """Number of recent EPL seasons to ingest."""
