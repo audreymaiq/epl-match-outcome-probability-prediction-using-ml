@@ -3,7 +3,7 @@ import logging
 import os
 from contextlib import contextmanager
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from sqlalchemy.pool import QueuePool
 from config.settings import get_config
@@ -189,16 +189,14 @@ class DatabaseConnector:
 
     @classmethod
     def get_session(cls):
-        """Tạo scoped session"""
-        session_factory = cls.get_session_factory()
-        return scoped_session(session_factory)
+        """Create one independent database session for a request or job."""
+        return cls.get_session_factory()()
 
     @classmethod
     @contextmanager
     def session_scope(cls):
         """Context manager cho session tự động commit/rollback/close"""
-        session_maker = cls.get_session()
-        session = session_maker()
+        session = cls.get_session()
         try:
             yield session
             session.commit()
