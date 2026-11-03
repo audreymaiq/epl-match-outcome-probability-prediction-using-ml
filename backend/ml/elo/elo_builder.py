@@ -29,19 +29,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ml.elo.elo_calculator import EloCalculator, EloRecord, EloConfig, DEFAULT_CONFIG
+from ml.config import load_ml_config
 
 logger = logging.getLogger(__name__)
-
-
-# Traditional EPL Top-6 teams (by name, normalized)
-EPL_TOP_6 = frozenset([
-    "Manchester City",
-    "Manchester United",
-    "Arsenal",
-    "Liverpool",
-    "Chelsea",
-    "Tottenham Hotspur",
-])
 
 
 class EloBuilder:
@@ -62,6 +52,7 @@ class EloBuilder:
         self._db = session
         self._calc = EloCalculator(config)
         self._config = config
+        self._top_teams = frozenset(load_ml_config().features.top_teams)
 
         # team_id → current ELO (updated as we process matches chronologically)
         self._ratings: Dict[int, float] = defaultdict(lambda: config.initial_elo)
@@ -219,7 +210,7 @@ class EloBuilder:
 
         home_name = self._team_names.get(home_id, "")
         away_name = self._team_names.get(away_id, "")
-        is_top6 = home_name in EPL_TOP_6 and away_name in EPL_TOP_6
+        is_top6 = home_name in self._top_teams and away_name in self._top_teams
 
         # 4. Update ratings
         new_home_elo, new_away_elo = self._calc.update(
