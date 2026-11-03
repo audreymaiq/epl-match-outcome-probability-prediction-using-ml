@@ -76,20 +76,40 @@ class SofaScoreProvider(AbstractDataProvider):
     def name(self) -> str:
         return PROVIDER_NAME
 
+    @property
+    def tournament_id(self) -> int:
+        return self._config.sofascore.premier_league_id
+
+    def list_seasons(self) -> List[tuple[str, int]]:
+        """Resolve season IDs from the provider instead of a dated local table."""
+        if hasattr(self, "_seasons"):
+            return self._seasons
+        response = self._extractor.fetch_seasons(self.tournament_id, breaker=self._breaker)
+        if not response or not isinstance(response.get("seasons"), list):
+            raise RuntimeError("SofaScore did not return an EPL season catalogue.")
+        seasons: List[tuple[str, int]] = []
+        for item in response["seasons"]:
+            year = item.get("year", "")
+            try:
+                start = int(year.split("/")[0])
+                if start < 100:
+                    start += 2000 if start < 90 else 1900
+                season_id = int(item["id"])
+                if season_id > 0:
+                    seasons.append((f"{start}/{start + 1}", season_id))
+            except (KeyError, TypeError, ValueError):
+                logger.warning("Ignoring malformed SofaScore season: %s", item)
+        if not seasons:
+            raise RuntimeError("SofaScore returned no usable EPL seasons.")
+        self._seasons = sorted(seasons, key=lambda season: season[0], reverse=True)
+        return self._seasons
+
     def health_check(self) -> bool:
         """
-        Verify SofaScore API is reachable by fetching one known match.
-        Uses the current EPL tournament page as a lightweight probe.
+        Verify the EPL season catalogue is available.
         """
         try:
-            result = self._extractor.fetch_paginated_data(
-                endpoint=self._endpoint_cls().SEASON_MATCHES,
-                response_field="events",
-                tournament_id=self._config.sofascore.premier_league_id,
-                season_id=self._current_season_id(),
-                breaker=self._breaker,
-            )
-            return result is not None
+            return bool(self.list_seasons())
         except Exception as exc:
             logger.warning("SofaScore health check failed: %s", exc)
             return False
@@ -100,21 +120,24 @@ class SofaScoreProvider(AbstractDataProvider):
         season_id: int,
     ) -> List[RawMatchSummary]:
         """
-        Fetch all FINISHED match summaries for a season.
+        Fetch finished matches and scheduled fixtures for a season.
         Paginates through all pages automatically.
         Returns sorted chronologically.
         """
         from providers.sofascore.endpoints import SofaScoreEndpoints
 
-        all_events, has_data = self._extractor.fetch_paginated_data(
-            endpoint=SofaScoreEndpoints.SEASON_MATCHES,
-            response_field="events",
-            tournament_id=tournament_id,
-            season_id=season_id,
-            breaker=self._breaker,
-        )
+        all_events = []
+        for endpoint in (SofaScoreEndpoints.SEASON_MATCHES_LAST, SofaScoreEndpoints.SEASON_MATCHES_NEXT):
+            events, _ = self._extractor.fetch_paginated_data(
+                endpoint=endpoint,
+                response_field="events",
+                tournament_id=tournament_id,
+                season_id=season_id,
+                breaker=self._breaker,
+            )
+            all_events.extend(events)
 
-        if not has_data:
+        if not all_events:
             logger.warning(
                 "No events returned for tournament=%d, season=%d",
                 tournament_id, season_id,
@@ -123,10 +146,11 @@ class SofaScoreProvider(AbstractDataProvider):
 
         # Map to provider-agnostic RawMatchSummary
         summaries: List[RawMatchSummary] = []
+        seen_ids = set()
         for event in all_events:
             status_type = self._get_nested(event, "status.type", "")
-            if status_type != "finished":
-                continue   # Only process completed matches
+            if status_type not in {"finished", "notstarted", "scheduled", "postponed"}:
+                continue
 
             try:
                 summary = RawMatchSummary(
@@ -138,14 +162,16 @@ class SofaScoreProvider(AbstractDataProvider):
                     round_number=self._get_nested(event, "roundInfo.round"),
                     raw=event,
                 )
-                summaries.append(summary)
+                if summary.external_id not in seen_ids:
+                    summaries.append(summary)
+                    seen_ids.add(summary.external_id)
             except (KeyError, TypeError) as exc:
                 logger.debug("Skipping malformed event %s: %s", event.get("id"), exc)
 
         # Sort chronologically
         summaries.sort(key=lambda s: s.start_timestamp or 0)
         logger.info(
-            "Season %d: %d finished matches fetched.", season_id, len(summaries)
+            "Season %d: %d matches and fixtures fetched.", season_id, len(summaries)
         )
         return summaries
 
@@ -173,17 +199,19 @@ class SofaScoreProvider(AbstractDataProvider):
             logger.warning("fetch_match_bundle: no detail for match %d - skipping.", match_id)
             return None
 
-        # 2. Incidents (goals, cards) - mandatory for outcome verification
-        incidents = self._extractor.fetch_incidents(match_id, breaker=self._breaker) or {}
+        is_finished = self._get_nested(detail, "event.status.type") == "finished"
+
+        # 2. Match statistics are not available before kickoff.
+        incidents = (self._extractor.fetch_incidents(match_id, breaker=self._breaker) or {}) if is_finished else {}
 
         # 3. Lineups (squad availability, player data) - optional
         lineups: dict = {}
-        if include_lineups:
+        if include_lineups and is_finished:
             lineups = self._extractor.fetch_lineups(match_id, breaker=self._breaker) or {}
 
         # 4. Statistics (xG proxy, possession, shots) - optional
         statistics: dict = {}
-        if include_statistics:
+        if include_statistics and is_finished:
             statistics = self._extractor.fetch_statistics(match_id, breaker=self._breaker) or {}
 
         bundle = RawMatchBundle(
@@ -225,18 +253,6 @@ class SofaScoreProvider(AbstractDataProvider):
             logger.debug(
                 "Session rotation after %d requests.", self._request_count
             )
-
-    def _current_season_id(self) -> int:
-        """Get the most recent known SofaScore season ID for health check."""
-        mapping = self._config.sofascore.get_season_id_mapping()
-        if mapping:
-            return list(mapping.values())[-1]
-        return 61627  # 2024/25 fallback
-
-    @staticmethod
-    def _endpoint_cls():
-        from providers.sofascore.endpoints import SofaScoreEndpoints
-        return SofaScoreEndpoints
 
     @staticmethod
     def _get_nested(data: dict, path: str, default=None):
