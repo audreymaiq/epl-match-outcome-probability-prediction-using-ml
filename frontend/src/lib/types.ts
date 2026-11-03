@@ -215,6 +215,7 @@ export interface ModelInfo {
   cv_evaluation_model?: string | null
   walk_forward_folds?: number | null
   cv_metrics?: Record<string, number | null>
+  baseline_cv_metrics?: Record<string, number | null>
 }
 
 export interface ModelPerformance {
@@ -222,6 +223,8 @@ export interface ModelPerformance {
   evaluated: number
   correct?: number
   accuracy: number | null
+  log_loss?: number | null
+  brier_score?: number | null
   note?: string
 }
 
