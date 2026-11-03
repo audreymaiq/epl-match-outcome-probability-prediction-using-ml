@@ -15,10 +15,16 @@ export const useMatch = (id: number) =>
     enabled: !!id,
   })
 
+export const useSeasons = () =>
+  useQuery({
+    queryKey: ['seasons'],
+    queryFn: () => api.getSeasons().then((r) => r.data),
+  })
+
 export const useTeams = () =>
   useQuery({
     queryKey: ['teams'],
-    queryFn: () => api.getTeams().then((r) => r.data),
+    queryFn: () => api.getTeams({ page_size: 100 }).then((r) => r.data),
   })
 
 export const useTeam = (id: number) =>
