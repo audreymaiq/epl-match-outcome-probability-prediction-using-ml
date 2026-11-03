@@ -37,7 +37,7 @@ def list_matches(
     items, total = svc.list_matches(
         season_name=season, status=status, team_id=team_id, page=page, page_size=page_size
     )
-    total_pages = max(1, -(-total // page_size))  # ceiling division
+    total_pages = -(-total // page_size)
     return PagedResponse(
         data=items,
         pagination=Pagination(page=page, page_size=page_size, total=total, total_pages=total_pages),
