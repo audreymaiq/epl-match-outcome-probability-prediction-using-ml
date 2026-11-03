@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from elt_pipeline.orchestrator import ETLOrchestrator
 
 
@@ -21,6 +23,14 @@ class FakeTransformer:
 
     def transform(self, raw_bundle):
         return raw_bundle
+
+
+def test_provider_and_transformer_must_match():
+    transformer = FakeTransformer()
+    transformer.provider_name = "different"
+
+    with pytest.raises(ValueError, match="mismatch"):
+        ETLOrchestrator(FakeProvider(), transformer)
 
 
 def test_process_season_counts_all_flushed_batches(monkeypatch):
