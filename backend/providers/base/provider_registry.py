@@ -157,8 +157,11 @@ def discover_providers() -> List[str]:
         module_path = f"providers.{subpkg_name}.provider"
         try:
             importlib.import_module(module_path)
-            discovered.append(subpkg_name)
-            logger.debug("discover_providers: imported '%s'", module_path)
+            if ProviderRegistry.is_registered(subpkg_name):
+                discovered.append(subpkg_name)
+                logger.debug("discover_providers: imported '%s'", module_path)
+            else:
+                logger.info("Provider module '%s' is not registered.", module_path)
         except ImportError as exc:
             logger.warning(
                 "discover_providers: could not import '%s': %s",
