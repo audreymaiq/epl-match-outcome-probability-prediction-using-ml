@@ -1,4 +1,3 @@
-# feature_pipeline/computers/h2h_computer.py
 """
 Head-to-Head Stats Computer.
 
@@ -24,7 +23,7 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from feature_pipeline.computers.base_computer import AbstractFeatureComputer
+from ml.features.batch.computers.base_computer import AbstractFeatureComputer
 
 logger = logging.getLogger(__name__)
 
