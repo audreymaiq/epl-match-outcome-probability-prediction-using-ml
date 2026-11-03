@@ -50,7 +50,7 @@ def list_predictions(
     "/model-probabilities/{match_id}",
     response_model=PredictResponse,
     summary="Quick prediction by match ID",
-    description="Convenience GET endpoint - equivalent to POST /predictions with match_id.",
+    description="Return probabilities for a registered fixture without recording a prediction.",
 )
 def predict_by_match_id(
     match_id: int,
@@ -62,4 +62,4 @@ def predict_by_match_id(
         match_id=match_id,
         include_feature_breakdown=include_breakdown,
     )
-    return svc.predict(req, db)
+    return svc.predict(req, db, record_prediction=False)
