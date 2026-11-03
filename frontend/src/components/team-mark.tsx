@@ -20,7 +20,13 @@ export function TeamMark({ team, size = 'md' }: { team: Pick<TeamBrief, 'name' |
   return (
     <span className={`relative grid ${dimensions} shrink-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-[#241c2c] text-xs font-extrabold tracking-wide text-white`}>
       <span className="absolute inset-0 grid place-items-center" style={{ backgroundColor: CLUB_COLORS[team.name.toLowerCase()] || '#45304f' }}>{initials || 'FC'}</span>
-      {team.logo_url && !imageFailed && <span className="absolute inset-0 grid place-items-center bg-[#17121e] p-1.5">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={team.logo_url} alt="" className="h-full w-full object-contain" onError={() => setImageFailed(true)} /></span>}
+      {team.logo_url && !imageFailed && (
+        <span className="absolute inset-0 grid place-items-center bg-[#17121e] p-1.5">
+          {/* External club logos have provider-specific hosts and use a local fallback. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={team.logo_url} alt="" className="h-full w-full object-contain" onError={() => setImageFailed(true)} />
+        </span>
+      )}
     </span>
   )
 }
