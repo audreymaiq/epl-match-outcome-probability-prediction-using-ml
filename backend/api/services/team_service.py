@@ -166,7 +166,7 @@ class TeamService:
         recent_sql = """
             SELECT
                 m.id, s.name AS season_name,
-                m.match_datetime::text, m.match_week,
+                to_char(m.match_datetime, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS match_datetime, m.match_week,
                 m.status, m.outcome, m.home_goals, m.away_goals,
                 ht.id AS ht_id, ht.name AS ht_name, ht.logo_url AS ht_logo,
                 at.id AS at_id, at.name AS at_name, at.logo_url AS at_logo
@@ -266,7 +266,7 @@ class TeamService:
         sql = """
             SELECT
                 m.id,
-                m.match_datetime::text AS match_date,
+                to_char(m.match_datetime, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS match_date,
                 CASE WHEN m.home_team_id = :tid THEN at.name ELSE ht.name END AS opponent,
                 CASE WHEN m.home_team_id = :tid THEN 'Home' ELSE 'Away' END AS location,
                 CASE WHEN m.home_team_id = :tid THEN m.home_goals ELSE m.away_goals END AS gf,
