@@ -71,7 +71,7 @@ def test_match_bundle_is_atomic_and_idempotent_on_postgres():
         with Session(engine) as session:
             session.begin()
             try:
-                loader = MatchLoader(session)
+                loader = MatchLoader(session, source_system="sofascore")
                 match_id = loader.load_bundle(bundle)
                 assert loader.load_bundle(bundle) == match_id
                 for table, expected in (
