@@ -4,6 +4,7 @@
   "elo": {
     "initial_elo": 1500.0,
     "home_advantage": 65.0,
+    "rating_scale": 400.0,
     "k_base": 20.0,
     "k_big_match": 28.0,
     "k_early_season": 32.0,
@@ -11,11 +12,42 @@
     "season_regression_factor": 0.33,
     "gd_weight": 0.5,
     "gd_cap": 1.75,
+    "draw_base": 0.28,
+    "draw_reduction": 0.08,
+    "draw_min": 0.18,
+    "draw_slope": 0.01,
+    "draw_midpoint": 100.0,
     "elo_min": 800.0,
     "elo_max": 2200.0
   },
   "features": {
     "form_decay": 0.85,
+    "expected_home_goals_multiplier": 1.1,
+    "h2h_over_2_5_prior": 0.53,
+    "h2h_btts_prior": 0.48,
+    "referee_avg_reds_prior": 0.1,
+    "referee_cards_scale": 1.5,
+    "rest_days_max": 30.0,
+    "top_teams": [
+      "Manchester City", "Manchester United", "Arsenal", "Liverpool",
+      "Chelsea", "Tottenham Hotspur"
+    ],
+    "derbies": [
+      ["Manchester United", "Manchester City"],
+      ["Arsenal", "Tottenham Hotspur"],
+      ["Liverpool", "Everton"],
+      ["Chelsea", "Arsenal"],
+      ["Chelsea", "Tottenham Hotspur"],
+      ["West Ham United", "Tottenham Hotspur"],
+      ["Newcastle United", "Sunderland"],
+      ["Aston Villa", "Birmingham City"],
+      ["Sheffield United", "Sheffield Wednesday"],
+      ["Leicester City", "Nottingham Forest"],
+      ["Leeds United", "Manchester United"],
+      ["Brentford", "Fulham"],
+      ["Crystal Palace", "Brighton"],
+      ["Liverpool", "Manchester United"]
+    ],
     "min_matches": {
       "form": 2,
       "h2h": 3,
