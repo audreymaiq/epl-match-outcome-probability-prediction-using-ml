@@ -87,24 +87,6 @@ class SofascoreWinnerCodes:
     DRAW_TYPE_1 = 3
     DRAW_TYPE_2 = 0
 
-# SofaScore specific constants
-class SofascoreConstants:
-    """Lớp chứa các ID cụ thể của SofaScore, ví dụ như ID của giải đấu, mùa giải."""
-    # Premier League tournament ID
-    EPL_TOURNAMENT_ID = 17
-    
-    # Common season IDs (update these as needed)
-    SEASON_IDS = {
-        "2017/18": 13380,
-        "2018/19": 17359,
-        "2019/20": 23776,
-        "2020/21": 29415,
-        "2021/22": 37036,
-        "2022/23": 41886,
-        "2023/24": 52186,
-        "2024/25": 61627 
-    }
-
 # Legacy support - keep for backward compatibility
 class BetType:
     UNKNOWN = "Unknown"
