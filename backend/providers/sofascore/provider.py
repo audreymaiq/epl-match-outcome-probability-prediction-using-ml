@@ -31,6 +31,7 @@ from providers.base.abstract_provider import (
     RawMatchSummary,
 )
 from providers.base.provider_registry import ProviderRegistry
+from config.core_constants import MatchStatus, get_match_status_from_sofascore
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class SofaScoreProvider(AbstractDataProvider):
         season_id: int,
     ) -> List[RawMatchSummary]:
         """
-        Fetch finished matches and scheduled fixtures for a season.
+        Fetch completed and upcoming fixtures, including terminal status changes.
         Paginates through all pages automatically.
         Returns sorted chronologically.
         """
@@ -149,7 +150,13 @@ class SofaScoreProvider(AbstractDataProvider):
         seen_ids = set()
         for event in all_events:
             status_type = self._get_nested(event, "status.type", "")
-            if status_type not in {"finished", "notstarted", "scheduled", "postponed"}:
+            if get_match_status_from_sofascore(status_type) not in {
+                MatchStatus.FINISHED,
+                MatchStatus.SCHEDULED,
+                MatchStatus.POSTPONED,
+                MatchStatus.CANCELLED,
+                MatchStatus.ABANDONED,
+            }:
                 continue
 
             try:
