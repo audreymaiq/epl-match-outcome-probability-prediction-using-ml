@@ -920,7 +920,8 @@ class SeasonBusinessLogic:
             year_str = match.group(1)
             try:
                 if len(year_str) == 2:
-                    return int(f"20{year_str}")
+                    year = int(year_str)
+                    return 2000 + year if year < 90 else 1900 + year
                 return int(year_str)
             except ValueError:
                 return None
