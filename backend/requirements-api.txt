@@ -1,0 +1,20 @@
+# Runtime dependencies for the prediction API.
+# Model libraries must match those used to create the joblib artifact.
+sqlalchemy>=2.0.0,<3.0
+psycopg2-binary>=2.9.0,<3.0
+pydantic>=2.7.0,<3.0
+pydantic-settings>=2.3.0,<3.0
+python-dotenv>=1.0.0,<2.0
+pytz>=2024.1
+python-dateutil>=2.9.0,<3.0
+fastapi>=0.115.0,<0.116.0
+uvicorn[standard]>=0.30.0,<1.0
+numpy>=1.26.0,<2.0
+pandas>=2.2.0,<3.0
+scikit-learn>=1.5.0,<2.0
+xgboost-cpu>=2.1.0,<3.0
+lightgbm>=4.5.0,<5.0
+catboost>=1.2.5,<2.0
+joblib>=1.4.0,<2.0
+prometheus-fastapi-instrumentator>=7.0.0,<8.0
+prometheus-client>=0.20.0,<1.0
