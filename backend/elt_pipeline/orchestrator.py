@@ -13,6 +13,7 @@ Usage:
 """
 
 import sys
+import os
 import gc
 import signal
 import logging
@@ -174,7 +175,7 @@ class ETLOrchestrator:
             from utils.db_connector import DatabaseConnector
 
             with DatabaseConnector.session_scope() as session:
-                loader = MatchLoader(session)
+                loader = MatchLoader(session, source_system=self._provider.name)
                 result = loader.bulk_load(bundles)
             logger.info("Batch loaded: %d success, %d failed.", result["success"], result["failed"])
             return result
@@ -239,11 +240,13 @@ def run_pipeline(
         return result
 
     # Resolve seasons to process
-    all_seasons = config.get_target_seasons_with_ids()  # [(idx, name, season_id), ...]
+    all_seasons = provider.list_seasons()
     if specific_seasons:
-        seasons = [s for s in all_seasons if s[1] in set(specific_seasons)]
+        requested = set(specific_seasons)
+        seasons = [season for season in all_seasons if season[0] in requested or
+                   f"{season[0][:4]}/{season[0][-2:]}" in requested]
     else:
-        seasons = all_seasons
+        seasons = all_seasons[:config.seasons.seasons_to_fetch]
 
     if not seasons:
         logger.warning("No seasons to process.")
@@ -251,9 +254,9 @@ def run_pipeline(
         return result
 
     result["total_seasons"] = len(seasons)
-    tournament_id = config.sofascore.premier_league_id
+    tournament_id = provider.tournament_id
 
-    for _, season_name, season_id in seasons:
+    for season_name, season_id in seasons:
         sr = orchestrator.process_season(tournament_id, season_id, season_name)
         result["season_results"].append(sr)
         result["total_matches"] += sr["total"]
@@ -282,7 +285,7 @@ def main() -> int:
         epilog="Example: python -m elt_pipeline.orchestrator --provider sofascore",
     )
     parser.add_argument(
-        "--provider", default="sofascore",
+        "--provider", default=os.getenv("PROVIDER", "sofascore"),
         help="Data provider to use (default: sofascore). "
              "Set PROVIDER in .env to override permanently.",
     )
