@@ -4,7 +4,7 @@ import pytest
 import joblib
 from sklearn.linear_model import LogisticRegression
 
-from ml.training import train as training_module
+from ml.models import ensemble as training_module
 
 
 def test_stacking_ensemble_uses_chronological_oof_and_returns_probabilities(monkeypatch, tmp_path):
