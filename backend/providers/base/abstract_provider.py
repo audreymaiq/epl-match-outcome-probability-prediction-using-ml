@@ -94,7 +94,7 @@ class AbstractDataProvider(ABC):
         """
         Fetch all match summaries for a given season.
         Returns list of RawMatchSummary, sorted chronologically.
-        Should only return FINISHED matches (pipeline only trains on completed data).
+        Include upcoming fixtures and status changes; training selects FINISHED matches.
         """
 
     @abstractmethod
