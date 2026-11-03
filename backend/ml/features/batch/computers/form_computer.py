@@ -1,4 +1,3 @@
-# feature_pipeline/computers/form_computer.py
 """
 Team Form Stats Computer.
 
@@ -16,7 +15,7 @@ Stats computed:
 Time-safe: all aggregation is BEFORE match_datetime - no leakage.
 
 ARCHITECTURE:
-  This computer runs in the feature_pipeline (batch ETL layer).
+  This computer runs in the ml.features.batch (batch ETL layer).
   FeatureExtractor computes model features directly from Matches for both
   training and inference. This table is a separate unweighted summary for
   reporting and must not be substituted for the model's weighted features.
@@ -28,7 +27,7 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from feature_pipeline.computers.base_computer import AbstractFeatureComputer
+from ml.features.batch.computers.base_computer import AbstractFeatureComputer
 
 logger = logging.getLogger(__name__)
 
