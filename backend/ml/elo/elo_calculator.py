@@ -59,6 +59,7 @@ class EloConfig:
     # ELO points that represent home field advantage in EPL
     # (Empirically: ~65 pts based on 10-season EPL data)
     home_advantage: float = 65.0
+    rating_scale: float = 400.0
 
     # K-factor range: how much each match can shift ratings
     k_base: float  = 20.0    # standard match
@@ -74,6 +75,11 @@ class EloConfig:
     # We use: multiplier = log(|gd| + 1) * gd_weight, capped at gd_cap
     gd_weight: float = 0.5
     gd_cap: float    = 1.75   # max multiplier for any goal difference
+    draw_base: float = 0.28
+    draw_reduction: float = 0.08
+    draw_min: float = 0.18
+    draw_slope: float = 0.01
+    draw_midpoint: float = 100.0
 
     # ELO bounds - hard limits to prevent runaway ratings
     elo_min: float = 800.0
@@ -163,7 +169,7 @@ class EloCalculator:
         Note: caller should apply home_advantage adjustment to elo_a
         BEFORE calling this method.
         """
-        return 1.0 / (1.0 + math.pow(10.0, (elo_b - elo_a) / 400.0))
+        return 1.0 / (1.0 + math.pow(10.0, (elo_b - elo_a) / self._cfg.rating_scale))
 
     def elo_to_win_probability(
         self,
@@ -252,15 +258,14 @@ class EloCalculator:
 
     def _estimate_draw_prob(self, elo_diff: float) -> float:
         """
-        EPL-calibrated draw probability based on ELO difference.
-
-        When teams are evenly matched (diff ≈ 0): draw_prob ≈ 0.28
-        When there's a large mismatch (diff > 200): draw_prob ≈ 0.20
+        Configured draw probability heuristic based on ELO difference.
         """
-        # Sigmoid curve fitted to EPL historical data
-        base_draw = 0.28
-        reduction = 0.08 * (1.0 / (1.0 + math.exp(-0.01 * (elo_diff - 100))))
-        return round(max(0.18, base_draw - reduction), 4)
+        # Sigmoid mapping; calibrate these parameters using held out seasons.
+        base_draw = self._cfg.draw_base
+        reduction = self._cfg.draw_reduction * (
+            1.0 / (1.0 + math.exp(-self._cfg.draw_slope * (elo_diff - self._cfg.draw_midpoint)))
+        )
+        return round(max(self._cfg.draw_min, base_draw - reduction), 4)
 
     def _clamp(self, elo: float) -> float:
         """Hard clamp ELO to valid range."""
