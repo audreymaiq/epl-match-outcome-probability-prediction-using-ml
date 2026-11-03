@@ -51,7 +51,7 @@ def model_features(
         return {"loaded": False, "features": []}
     return {
         "loaded": True,
-        "n_features": len(svc._feature_names),
-        "features": svc._feature_names,
+        "n_features": len(svc.feature_names),
+        "features": svc.feature_names,
     }
 
