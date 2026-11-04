@@ -56,6 +56,8 @@ mlruns/
 backend/cache/
 backend/logs/
 backend/data/raw/*.csv
+backend/data/datasets/
+backend/models/*/
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
@@ -78,3 +80,8 @@ coverage.xml
 materials/
 report/
 
+# Isolated local validation infrastructure and environments
+.validation/
+backups/
+.ruff_cache/
+.venv/
