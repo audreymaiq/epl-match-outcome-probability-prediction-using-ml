@@ -1,7 +1,8 @@
 'use client'
 
-import Link from 'next/link'
+import Link from '@/components/competition-link'
 import { useState } from 'react'
+import { useCompetition } from '@/lib/competition'
 import { ArrowRight, CalendarDays, ChevronRight } from 'lucide-react'
 import { useMatches, useTeams, usePredict, useModelInfo, useSeasons } from '@/lib/hooks'
 import { MatchCard } from '@/components/match-card'
@@ -16,6 +17,7 @@ function defaultKickoff() {
 }
 
 function MatchEstimator() {
+  const { competition } = useCompetition()
   const { data: teamsPage, isLoading: teamsLoading } = useTeams()
   const { data: modelInfo } = useModelInfo()
   const { data: seasons = [] } = useSeasons()
@@ -55,7 +57,7 @@ function MatchEstimator() {
         <label className="block space-y-1.5"><span className="data-label">Away club</span><select className="field-control" value={awayId} onChange={(event) => { setAwayId(event.target.value); prediction.reset() }} required disabled={teamsLoading}><option value="">Select a club</option>{teams.filter((team: Team) => String(team.id) !== homeId).map((team: Team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
         <label className="block space-y-1.5"><span className="data-label">Kickoff in your time zone</span><input className="field-control" type="datetime-local" value={matchDate} onChange={(event) => { setMatchDate(event.target.value); prediction.reset() }} required /></label>
         <label className="block space-y-1.5"><span className="data-label">Season</span><select className="field-control" value={selectedSeason} onChange={(event) => { setSeasonName(event.target.value); prediction.reset() }} required disabled={!seasons.length}><option value="">Select a season</option>{seasons.map((season) => <option key={season} value={season}>{season}</option>)}</select></label>
-        <label className="block space-y-1.5"><span className="data-label">Matchweek</span><input className="field-control" type="number" min="1" max="38" value={matchWeek} onChange={(event) => { setMatchWeek(event.target.value); prediction.reset() }} required /></label>
+        <label className="block space-y-1.5"><span className="data-label">Matchweek</span><input className="field-control" type="number" min="1" max={competition?.rounds} value={matchWeek} onChange={(event) => { setMatchWeek(event.target.value); prediction.reset() }} required /></label>
         <button className="button-primary w-full" type="submit" disabled={!modelReady || !homeId || !awayId || !selectedSeason || !matchWeek || prediction.isPending}>{prediction.isPending ? 'Calculating…' : modelReady ? 'Show probabilities' : 'Model not installed'}<ArrowRight size={15} /></button>
       </form>
       {prediction.isError && <p role="alert" className="mt-4 border-l-2 border-[var(--danger)] bg-[rgba(255,139,145,.07)] p-3 text-xs leading-5 text-[var(--danger)]">The estimate could not be generated. The prediction service may be unavailable.</p>}
@@ -65,6 +67,7 @@ function MatchEstimator() {
 }
 
 export default function HomePage() {
+  const { competition } = useCompetition()
   const { data, isLoading, isError } = useMatches({ status: 'SCHEDULED', page_size: 6 })
   const matches = data?.data ?? []
 
@@ -73,9 +76,9 @@ export default function HomePage() {
       <section className="mb-9 border-y border-white/[0.12] py-7 sm:py-9">
         <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
           <div>
-            <p className="eyebrow">England · Premier League</p>
+            <p className="eyebrow">{competition ? `${competition.country} · ${competition.name}` : 'Football'}</p>
             <h1 className="mt-3 text-4xl font-extrabold leading-none tracking-[-0.045em] text-white sm:text-6xl">Match centre</h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">Fixtures, results and match outcome probabilities for the Premier League.</p>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">Fixtures, results and match outcome probabilities{competition ? ` for ${competition.name}` : ''}.</p>
           </div>
           <Link href="/matches" className="button-secondary self-start sm:self-auto">All fixtures <ArrowRight size={15} /></Link>
         </div>
