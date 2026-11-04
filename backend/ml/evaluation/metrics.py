@@ -2,7 +2,7 @@
 Evaluation metrics for multi-class football outcome predictions.
 
 Implements proper probabilistic forecast metrics:
-- Ranked Probability Score (RPS) - preferred over log-loss for ordered outcomes
+- Ranked Probability Score (RPS) - diagnostic using the explicit H/D/A ordering
 - Brier Score per class (OvR)
 - Expected Calibration Error (ECE)
 - ROI simulation vs naive strategies
@@ -29,7 +29,7 @@ def compute_rps(
 
     RPS measures the accuracy of ordered probabilistic predictions.
     Lower is better. Perfect probabilistic prediction → RPS = 0.
-    Naive (uniform) prediction → RPS ≈ 0.333.
+    Uniform predictions with uniformly distributed labels have mean RPS 2/9.
 
     Formula:
         RPS_i = (1 / (K-1)) * Σ_{k=1}^{K-1} (CDF_pred_k - CDF_actual_k)²
@@ -175,7 +175,7 @@ def compute_calibration_curve(
     counts = np.zeros(n_bins, dtype=int)
 
     for i, (lo, hi) in enumerate(zip(bin_edges[:-1], bin_edges[1:])):
-        mask = (class_prob > lo) & (class_prob <= hi)
+        mask = (class_prob >= lo) & (class_prob <= hi if i == n_bins-1 else class_prob < hi)
         counts[i] = mask.sum()
         if counts[i] == 0:
             mean_pred[i] = (lo + hi) / 2
@@ -209,8 +209,7 @@ def compute_roi_simulation(
     Args:
         y_true:    True labels (0=H, 1=D, 2=A), shape (n,)
         y_proba:   Model probabilities, shape (n, 3)
-        odds:      Decimal odds matrix, shape (n, 3).
-                   If None, uses empirical frequency implied odds with 10% margin.
+        odds:      Observed decimal odds matrix, shape (n, 3), required.
         stake:     Bet size per match (currency-neutral)
         threshold: Min probability to place a model bet
 
@@ -219,12 +218,11 @@ def compute_roi_simulation(
     """
     n = len(y_true)
 
-    # Build implied odds from empirical frequencies if not supplied
     if odds is None:
-        counts = np.bincount(y_true, minlength=3).astype(float)
-        freq = np.clip(counts / n, 0.05, 0.95)
-        base_odds = (1.0 / freq) * 0.90   # 10% bookmaker margin
-        odds = np.tile(base_odds, (n, 1))
+        raise ValueError("Observed pre-decision odds are required; ROI cannot be inferred from outcome frequencies")
+    odds = np.asarray(odds, dtype=float)
+    if odds.shape != (n, 3) or not np.isfinite(odds).all() or (odds <= 1).any() or n == 0 or stake <= 0:
+        raise ValueError("ROI requires nonempty data, positive stakes and finite decimal odds above 1")
 
     model_preds = y_proba.argmax(axis=1)
     model_conf = y_proba.max(axis=1)
