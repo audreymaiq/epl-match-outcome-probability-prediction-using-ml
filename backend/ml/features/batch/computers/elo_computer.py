@@ -22,9 +22,9 @@ class EloComputer(AbstractFeatureComputer):
     def name(self) -> str:
         return "EloRatings"
 
-    def compute(self, session: Session, season_name: Optional[str] = None) -> int:
+    def compute(self, session: Session, season_name: Optional[str] = None, *, league_id=None, competition=None, config=None) -> int:
         logger.info("Computing EloRatings (via EloBuilder)...")
-        builder = EloBuilder(session)
+        builder = EloBuilder(session, competition=competition, ml_config=config)
         builder.build_from_db()
         rows = builder.save_to_db()
         logger.info("EloRatings: saved %d rows.", rows)
