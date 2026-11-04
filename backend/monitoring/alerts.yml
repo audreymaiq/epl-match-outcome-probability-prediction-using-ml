@@ -1,0 +1,45 @@
+groups:
+  # Starter operational thresholds. Tune these to the deployment schedule and
+  # validated quality policy; Alertmanager delivery must be configured separately.
+  - name: football_pipeline
+    rules:
+      - alert: FootballMonitoringUnavailable
+        expr: football_monitoring_available == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pipeline monitoring cannot read PostgreSQL"
+          description: "Check API logs, database connectivity and migration state. See docs/operations.md."
+      - alert: FootballIngestionStale
+        expr: time() - football_ingestion_last_success_timestamp_seconds > 86400
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No successful ingestion for {{ $labels.league }} within 24 hours"
+          description: "Inspect football pipeline status and provider connectivity. Adjust threshold to the agreed ingestion schedule."
+      - alert: FootballOperationFailed
+        expr: football_runs_failed_24h > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A CLI operation failed for {{ $labels.league }}"
+          description: "Inspect run_id and steps using football pipeline status; the previous active model remains selected."
+      - alert: FootballOperationLongRunning
+        expr: football_run_duration_seconds > 10800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Operation exceeds three hours for {{ $labels.league }}"
+          description: "Check progress and ownership of the advisory lock before stopping a process."
+      - alert: FootballModelObservedLossHigh
+        expr: football_model_log_loss_90d > 1.2 and on(league) football_model_evaluated_90d >= 100
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Observed model loss is high for {{ $labels.league }}"
+          description: "Inspect sample mix, source changes, calibration and chronological evaluation before changing the active model."
