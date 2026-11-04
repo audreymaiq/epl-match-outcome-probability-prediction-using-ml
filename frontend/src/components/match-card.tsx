@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import Link from '@/components/competition-link'
 import type { MatchListItem } from '@/lib/types'
 import { TeamMark } from '@/components/team-mark'
 
