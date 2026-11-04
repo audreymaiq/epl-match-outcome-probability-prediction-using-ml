@@ -22,8 +22,13 @@ logger = logging.getLogger(__name__)
 
 class MatchService:
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, competition=None):
+        from config.competitions import get_competition
+        self.competition = competition or get_competition()
         self._db = session
+
+    def _execute(self, statement, parameters=None):
+        return self._db.execute(statement, {"league_slug": self.competition.slug, **(parameters or {})})
 
     def list_matches(
         self,
@@ -64,7 +69,7 @@ class MatchService:
                 m.home_goals, m.away_goals,
                 ht.id AS ht_id, ht.name AS ht_name, ht.logo_url AS ht_logo,
                 at.id AS at_id, at.name AS at_name, at.logo_url AS at_logo
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league_slug
             JOIN "Seasons" s   ON s.id = m.season_id
             JOIN "Teams" ht    ON ht.id = m.home_team_id
             JOIN "Teams" at    ON at.id = m.away_team_id
@@ -73,13 +78,13 @@ class MatchService:
             LIMIT :limit OFFSET :offset
         """
         count_sql = f"""
-            SELECT COUNT(*) FROM "Matches" m
+            SELECT COUNT(*) FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league_slug
             JOIN "Seasons" s ON s.id = m.season_id
             {where}
         """
 
-        rows = self._db.execute(text(sql), params).fetchall()
-        total = self._db.execute(text(count_sql), {k: v for k, v in params.items() if k not in ("limit", "offset")}).scalar()
+        rows = self._execute(text(sql), params).fetchall()
+        total = self._execute(text(count_sql), {k: v for k, v in params.items() if k not in ("limit", "offset")}).scalar()
 
         items = [
             MatchListItem(
@@ -121,7 +126,7 @@ class MatchService:
                 ats.shots_on_target AS a_sot,
                 hts.corners AS h_corners,
                 ats.corners AS a_corners
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league_slug
             JOIN "Seasons" s    ON s.id = m.season_id
             JOIN "Teams" ht     ON ht.id = m.home_team_id
             JOIN "Teams" at     ON at.id = m.away_team_id
@@ -131,7 +136,7 @@ class MatchService:
             LEFT JOIN "MatchTeamStats" ats ON ats.match_id = m.id AND ats.team_id = m.away_team_id
             WHERE m.id = :match_id
         """
-        row = self._db.execute(text(sql), {"match_id": match_id}).fetchone()
+        row = self._execute(text(sql), {"match_id": match_id}).fetchone()
         if not row:
             raise NotFoundException("Match", match_id)
 
