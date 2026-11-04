@@ -1,225 +1,117 @@
-# ml/training/train.py
-"""Train and evaluate an EPL outcome model using chronological seasons."""
+"""Evaluate chronologically and train an immutable candidate from a verified dataset."""
 
-from __future__ import annotations
-
-import logging
-import os
-import sys
 import argparse
 import json
+import os
+import platform
+import subprocess
+from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from importlib.metadata import version as package_version
+from uuid import uuid4
 
 import numpy as np
-import pandas as pd
-import joblib
-
-from ml.training.walk_forward_cv import WalkForwardCV
+from config.competitions import get_competition
 from ml.config import load_ml_config
-from ml.models.ensemble import LABEL_MAP, MODELS_DIR, StackingEnsemble, _make_lightgbm
+from ml.data.snapshots import create_dataset, read_dataset
+from ml.features.contracts import feature_fingerprint
+from ml.models.baselines import FrequencyClassifier
+from ml.models.ensemble import LABEL_MAP, StackingEnsemble, _make_lightgbm
+from ml.registry import save_candidate
+from ml.training.walk_forward_cv import WalkForwardCV
 
-logger = logging.getLogger(__name__)
 
-
-def train(
-    season_name: Optional[str] = None,
-    save_model: bool = True,
-    model_name: Optional[str] = None,
-    mlflow_tracking_uri: Optional[str] = None,
-    config_path: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Full training pipeline.
-
-    Args:
-        season_name:          Limit training data to this season. None = all seasons.
-        save_model:           If True, serialise model to disk.
-        model_name:           Filename prefix for saved model.
-        mlflow_tracking_uri:  MLflow tracking server URI.
-
-    Returns:
-        Dict with CV metrics and model path.
-    """
-    from utils.db_connector import DatabaseConnector
-    from utils.logging_config import setup_logging
-
-    setup_logging()
+def train(season_name=None, save_model=True, model_name=None, mlflow_tracking_uri=None,
+          config_path=None, *, league=None, dataset_id=None, seasons=None):
+    competition = get_competition(league)
     config = load_ml_config(config_path)
-    model_name = model_name or config.model_name
-    logger.info("=" * 60)
-    logger.info("Training pipeline started | Season: %s", season_name or "ALL")
-    logger.info("=" * 60)
-
-    # ── 1. Feature extraction ─────────────────────────────────────────────
-    logger.info("Extracting features from DB...")
-    with DatabaseConnector.session_scope() as session:
-        from ml.features.feature_extractor import FeatureExtractor
-        extractor = FeatureExtractor(session, config=config)
-        df = extractor.extract_all_finished_matches(season_name=season_name)
-
-    if df.empty:
-        raise RuntimeError("No training data found. Run ELT pipeline first.")
-
-    # Drop rows without outcome
-    df = df[df["outcome"].notna() & df["outcome"].isin(["H", "D", "A"])].copy()
-    df = df.sort_values(["match_datetime", "match_id"]).reset_index(drop=True)
-    logger.info("Training set: %d matches after filtering.", len(df))
-
-    # Feature columns (all numeric except identifiers and target)
-    exclude = {"match_id", "outcome", "season_name", "match_datetime", "home_team_name", "away_team_name"}
-    feature_cols = [
-        column for column in df.columns
-        if column not in exclude and pd.api.types.is_numeric_dtype(df[column])
-    ]
-    if not feature_cols:
-        raise RuntimeError("Feature extraction produced no numeric model inputs.")
-    logger.info("Feature set: %d features.", len(feature_cols))
-
-    # Label encoding
-    y = np.array([LABEL_MAP[o] for o in df["outcome"]])
-    X = df[feature_cols].values.astype(np.float32)
-
-    # ── 2. Walk-forward CV ────────────────────────────────────────────────
-    logger.info("Running walk-forward cross-validation...")
-    cv = WalkForwardCV(
-        n_test_seasons=config.cv.test_seasons,
-        min_train_seasons=config.cv.min_train_seasons,
-        gap_rounds=config.cv.gap_rounds,
-        min_train_matches=config.cv.min_train_matches,
-        min_test_matches=config.cv.min_test_matches,
-    )
-
-    # Evaluate the baseline and the actual production estimator on identical folds.
-    lgb_cv = _make_lightgbm(config.estimators["lightgbm"])
-    baseline_cv = cv.evaluate(lgb_cv, df, feature_cols, target_col="outcome")
-    ensemble_cv = cv.evaluate(lambda: StackingEnsemble(config=config), df, feature_cols, target_col="outcome")
-    if not baseline_cv.folds or not ensemble_cv.folds:
-        raise RuntimeError("Insufficient successful chronological folds to evaluate the model.")
-    logger.info("Baseline CV summary: %s", json.dumps(baseline_cv.summary, indent=2))
-    logger.info("Ensemble CV summary: %s", json.dumps(ensemble_cv.summary, indent=2))
-
-    # ── 4. Train final ensemble on ALL data ───────────────────────────────
-    logger.info("Training final StackingEnsemble on all %d samples...", len(X))
-    ensemble = StackingEnsemble(config=config)
-    ensemble.fit(
-        X,
-        y,
-        timestamps=df["match_datetime"].to_numpy(),
-    )
-
-    # ── 5. Final holdout evaluation (last season) ─────────────────────────
-    final_metrics = {}
-    if len(ensemble_cv.folds) > 0:
-        final_fold = ensemble_cv.folds[-1]
-        final_metrics = {
-            "cv_accuracy":     ensemble_cv.mean_accuracy,
-            "cv_log_loss":     ensemble_cv.mean_log_loss,
-            "cv_brier":        ensemble_cv.mean_brier,
-            "last_fold_acc":   final_fold.accuracy,
-            "last_fold_loss":  final_fold.log_loss,
-            "last_test_season": final_fold.test_season,
-        }
-    logger.info("Final metrics: %s", final_metrics)
-
-    # ── 6. Serialise model ────────────────────────────────────────────────
-    model_path = None
-    if save_model:
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        version = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        model_path = MODELS_DIR / f"{model_name}.pkl"
-        artifact = {
-            "schema_version": 1,
-            "class_order": ["H", "D", "A"],
-            "model": ensemble,
-            "feature_names": feature_cols,
-            "metadata": {
-                "version": version,
-                "trained_at": datetime.now(timezone.utc).isoformat(),
-                "training_seasons": sorted(df["season_name"].unique().tolist()) if "season_name" in df.columns else [],
-                "n_features": len(feature_cols),
-                "n_train_samples": len(X),
-                "algorithm": "StackingEnsemble(XGB+LGB+CatBoost→LR)",
-                "cv_evaluation_model": "StackingEnsemble",
-                "walk_forward_folds": ensemble_cv.n_folds,
-                "cv_metrics": ensemble_cv.summary,
-                "baseline_cv_metrics": baseline_cv.summary,
-                "training_config": config.as_dict(),
-            },
-        }
-        temporary_path = model_path.with_suffix(".pkl.tmp")
-        try:
-            joblib.dump(artifact, temporary_path, compress=3)
-            os.replace(temporary_path, model_path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-        logger.info("Model saved: %s", model_path)
-
-    # ── 7. MLflow logging ─────────────────────────────────────────────────
+    from ml.provenance import capture_source
+    source_files, provenance = capture_source()
     tracking_uri = mlflow_tracking_uri or os.getenv("MLFLOW_TRACKING_URI")
     if tracking_uri:
         try:
             import mlflow
-            mlflow.set_tracking_uri(tracking_uri)
-            with mlflow.start_run(run_name=f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
-                mlflow.log_params({
-                    "n_features": len(feature_cols),
-                    "n_train_samples": len(X),
-                    "season_filter": season_name or "all",
-                })
-                mlflow.log_metrics({k: v for k, v in final_metrics.items() if isinstance(v, float)})
-                if model_path:
-                    mlflow.log_artifact(str(model_path))
-                logger.info("MLflow run logged.")
-        except Exception as exc:
-            logger.warning("MLflow logging failed (non-critical): %s", exc)
-
-    return {
-        "success": True,
-        "model_path": str(model_path) if model_path else None,
-        "n_features": len(feature_cols),
-        "cv_summary": ensemble_cv.summary,
-        "baseline_cv_summary": baseline_cv.summary,
-        "metrics": final_metrics,
+        except ImportError as exc:
+            raise ValueError("Install requirements-tracking.txt before enabling MLflow tracking") from exc
+    if competition.slug != "epl" and not (config_path or os.getenv("ML_CONFIG_PATH")):
+        raise ValueError("Supply an explicit ML configuration for a new competition")
+    if dataset_id and (season_name or seasons):
+        raise ValueError("A dataset snapshot already defines its training seasons")
+    if not dataset_id:
+        manifest = create_dataset(league=competition.slug, seasons=seasons or ([season_name] if season_name else None), config_path=config_path)
+        dataset_id = manifest["dataset_id"]
+    frame, manifest = read_dataset(competition.slug, dataset_id)
+    if manifest["feature_config_hash"] != feature_fingerprint(config, competition):
+        raise ValueError("Dataset features and requested training configuration are incompatible")
+    names = manifest["feature_names"]
+    values = frame[names].to_numpy(dtype=np.float32)
+    if not np.isfinite(values).all() or not frame["outcome"].isin(LABEL_MAP).all():
+        raise ValueError("Dataset contains invalid features or outcome labels")
+    labels = frame["outcome"].map(LABEL_MAP).to_numpy(dtype=int)
+    cv = WalkForwardCV(n_test_seasons=config.cv.test_seasons, min_train_seasons=config.cv.min_train_seasons,
+        gap_rounds=config.cv.gap_rounds, min_train_matches=config.cv.min_train_matches,
+        min_test_matches=config.cv.min_test_matches)
+    frequency = cv.evaluate(FrequencyClassifier(), frame, names)
+    baseline = cv.evaluate(_make_lightgbm(config.estimators["lightgbm"]), frame, names)
+    result = cv.evaluate(lambda: StackingEnsemble(config=config), frame, names)
+    if not result.folds or len(result.folds) != len(frequency.folds) or len(result.folds) != len(baseline.folds):
+        raise ValueError("Insufficient or inconsistent chronological folds; ingest more seasons")
+    estimator = StackingEnsemble(config=config)
+    estimator.fit(values, labels, timestamps=frame["match_datetime"].to_numpy())
+    if capture_source()[1] != provenance:
+        raise RuntimeError("Application source changed during training; retry using a stable checkout")
+    model_version = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}_{uuid4().hex[:12]}"
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True).stdout)
+    except (OSError, subprocess.SubprocessError):
+        commit, dirty = os.getenv("GIT_COMMIT", "unknown"), None
+    metadata = {
+        "version": model_version, "league": competition.slug, "competition": competition.as_dict(),
+        "feature_config_hash": manifest["feature_config_hash"], "dataset_id": dataset_id,
+        "dataset_sha256": manifest["data_sha256"], "training_match_ids": frame["match_id"].tolist(),
+        "trained_at": datetime.now(timezone.utc).isoformat(), "training_seasons": manifest["seasons"],
+        "n_features": len(names), "n_train_samples": len(frame),
+        "algorithm": "StackingEnsemble(XGB+LGB+CatBoost→LR)", "cv_evaluation_model": "StackingEnsemble",
+        "walk_forward_folds": len(result.folds), "fold_results": [asdict(fold) for fold in result.folds],
+        "cv_metrics": result.summary, "baseline_cv_metrics": baseline.summary,
+        "frequency_cv_metrics": frequency.summary, "training_config": config.as_dict(),
+        "code_revision": commit, "working_tree_dirty": dirty, "python": platform.python_version(),
+        "source_provenance": provenance,
+        "libraries": {name: package_version(name) for name in ("numpy", "pandas", "scikit-learn", "xgboost-cpu", "lightgbm", "catboost", "scipy", "joblib")},
+        "data_time_policy": manifest["data_time_policy"], "model_name": model_name or config.model_name,
+        "history_policy": "prior_local_calendar_day",
     }
+    artifact = {"schema_version": 2, "class_order": ["H", "D", "A"], "feature_names": names,
+                "model": estimator, "metadata": metadata}
+    path = save_candidate(artifact, source_files=source_files) if save_model else None
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
+        with mlflow.start_run(run_name=model_version):
+            mlflow.log_params({"league": competition.slug, "dataset_id": dataset_id,
+                               "feature_config_hash": manifest["feature_config_hash"], "code_revision": commit})
+            mlflow.log_metrics({k: v for k, v in result.summary.items() if isinstance(v, (float, int))})
+            mlflow.log_dict(metadata, "metadata.json")
+            if path:
+                mlflow.log_artifact(str(path))
+    return {"model_version": model_version, "model_path": str(path) if path else None,
+            "dataset_id": dataset_id, "league": competition.slug, "cv_metrics": result.summary,
+            "frequency_cv_metrics": frequency.summary}
 
 
-# ── CLI entry point ───────────────────────────────────────────────────────────
-
-def main() -> int:
-    from utils.logging_config import setup_logging
-
-    parser = argparse.ArgumentParser(
-        description="Train EPL Match Outcome Prediction Model",
-        epilog='python -m ml.training.train --season "2023/2024"',
-    )
-    parser.add_argument("--season", default=None, metavar="SEASON")
-    parser.add_argument("--no-save", action="store_true", help="Do not save model to disk")
-    parser.add_argument("--mlflow", default=None, metavar="URI", help="MLflow tracking URI")
-    parser.add_argument("--config", default=None, metavar="PATH", help="Validated JSON ML configuration")
-    parser.add_argument("--log-level", default="INFO",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--league")
+    parser.add_argument("--config")
+    parser.add_argument("--dataset")
+    parser.add_argument("--seasons", nargs="+")
+    parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--mlflow")
     args = parser.parse_args()
-
-    setup_logging(log_level=args.log_level)
-
-    result = train(
-        season_name=args.season,
-        save_model=not args.no_save,
-        mlflow_tracking_uri=args.mlflow,
-        config_path=args.config,
-    )
-
-    if result["success"]:
-        logger.info("Training complete. Model: %s", result.get("model_path"))
-        logger.info("CV Summary: %s", result.get("cv_summary"))
-        return 0
-    return 1
+    print(json.dumps(train(league=args.league, config_path=args.config, dataset_id=args.dataset,
+        seasons=args.seasons, save_model=not args.no_save, mlflow_tracking_uri=args.mlflow)))
+    return 0
 
 
 if __name__ == "__main__":
-    # Invoke the importable module so serialized estimator classes keep a stable
-    # module path when this file is launched with ``python -m``.
-    from ml.training.train import main as module_main
-
-    sys.exit(module_main())
+    raise SystemExit(main())
