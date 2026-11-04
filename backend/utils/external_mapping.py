@@ -13,7 +13,8 @@ def get_internal_id(
     external_id: str, 
     entity_type: str, 
     source_system: str,
-    session: Optional[Session] = None
+    session: Optional[Session] = None,
+    scope: str = "",
 ) -> Optional[int]:
     """
     Truy vấn internal_id từ mapping table với validation
@@ -25,6 +26,8 @@ def get_internal_id(
     Returns:
         internal_id hoặc None nếu không tìm thấy
     """
+    if not source_system or len(source_system) > 50:
+        raise ValueError("source_system must contain 1 to 50 characters")
     # Validate entity_type
     if entity_type not in VALID_ENTITY_TYPES:
         raise ValueError(f"Invalid entity_type: {entity_type}. Valid types: {VALID_ENTITY_TYPES}")
@@ -35,13 +38,15 @@ def get_internal_id(
         WHERE external_id = :external_id
             AND entity_type = :entity_type
             AND source_system = :source_system
+            AND scope = :scope
         LIMIT 1
     """)
     
     params = {
         "external_id": external_id,
         "entity_type": entity_type,
-        "source_system": source_system[:50]  # Ensure max length
+        "source_system": source_system,
+        "scope": scope,
     }
     
     try:
@@ -67,7 +72,8 @@ def upsert_mapping(
     entity_type: str,
     source_system: str,
     source_detail: Optional[str] = None,
-    session: Optional[Session] = None
+    session: Optional[Session] = None,
+    scope: str = "",
 ):
     """
     UPSERT mapping với transaction management và validation
@@ -76,6 +82,8 @@ def upsert_mapping(
         ValueError: Nếu entity_type không hợp lệ
         SQLAlchemyError: Cho lỗi database
     """
+    if not source_system or len(source_system) > 50:
+        raise ValueError("source_system must contain 1 to 50 characters")
     # Validate entity_type
     if entity_type not in VALID_ENTITY_TYPES:
         raise ValueError(f"Invalid entity_type: {entity_type}. Valid types: {VALID_ENTITY_TYPES}")
@@ -83,17 +91,17 @@ def upsert_mapping(
     query = text("""
         INSERT INTO "ExternalMapping" (
             external_id, internal_id, entity_type,
-            source_system, source_detail
+            source_system, source_detail, scope
         )
         VALUES (
             :external_id, :internal_id, :entity_type,
-            :source_system, :source_detail
+            :source_system, :source_detail, :scope
         )
-        ON CONFLICT (external_id, entity_type, source_system)
+        ON CONFLICT (external_id, entity_type, source_system, scope)
         DO UPDATE SET
-            internal_id = EXCLUDED.internal_id,
             source_detail = EXCLUDED.source_detail,
             updated_at = NOW()
+        WHERE "ExternalMapping".internal_id = EXCLUDED.internal_id
         RETURNING id
     """)
     
@@ -101,7 +109,8 @@ def upsert_mapping(
         "external_id": external_id,
         "internal_id": internal_id,
         "entity_type": entity_type,
-        "source_system": source_system[:50],  # Trim to max length
+        "source_system": source_system,
+        "scope": scope,
         "source_detail": source_detail
     }
     
@@ -110,6 +119,8 @@ def upsert_mapping(
             with DatabaseConnector.session_scope() as session:
                 result = session.execute(query, params)
                 upserted_id = result.scalar_one_or_none()
+                if upserted_id is None:
+                    raise ValueError("External ID already maps to a different entity; explicit reconciliation required")
                 session.flush()
                 logger.info(
                     f"Upserted mapping for external_id='{external_id}' "
@@ -119,6 +130,8 @@ def upsert_mapping(
         else:
             result = session.execute(query, params)
             upserted_id = result.scalar_one_or_none()
+            if upserted_id is None:
+                raise ValueError("External ID already maps to a different entity; explicit reconciliation required")
             logger.debug(
                 f"Upserted mapping (in external session) for external_id='{external_id}' "
                 f"-> internal_id={internal_id}. Mapping ID: {upserted_id}"
