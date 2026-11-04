@@ -38,7 +38,7 @@ class FormComputer(AbstractFeatureComputer):
     def name(self) -> str:
         return "TeamFormStats"
 
-    def compute(self, session: Session, season_name: Optional[str] = None) -> int:
+    def compute(self, session: Session, season_name: Optional[str] = None, *, league_id=None, competition=None, config=None) -> int:
         """
         Compute rolling form for every (team, match) pair.
 
@@ -59,7 +59,7 @@ class FormComputer(AbstractFeatureComputer):
         )
 
         anchor_season_filter = ""
-        params: dict = {}
+        params: dict = {"league_id": league_id}
         if season_name:
             anchor_season_filter = "AND anchor_s.name = :season_name"
             params["season_name"] = season_name
@@ -87,7 +87,7 @@ class FormComputer(AbstractFeatureComputer):
                 CASE WHEN m.outcome = 'D' THEN 1 ELSE 0 END AS is_draw,
                 CASE WHEN m.outcome = 'A' THEN 1 ELSE 0 END AS is_loss,
                 CASE WHEN m.away_goals = 0 THEN 1 ELSE 0 END AS clean_sheet
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id AND scope_s.league_id=:league_id
             WHERE m.status = 'FINISHED'
               AND m.home_goals IS NOT NULL
 
@@ -109,7 +109,7 @@ class FormComputer(AbstractFeatureComputer):
                 CASE WHEN m.outcome = 'D' THEN 1 ELSE 0 END,
                 CASE WHEN m.outcome = 'H' THEN 1 ELSE 0 END,
                 CASE WHEN m.home_goals = 0 THEN 1 ELSE 0 END
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id AND scope_s.league_id=:league_id
             WHERE m.status = 'FINISHED'
               AND m.away_goals IS NOT NULL
         ),
@@ -120,7 +120,7 @@ class FormComputer(AbstractFeatureComputer):
                 m.match_datetime AS anchor_dt,
                 m.season_id,
                 t.team_id
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id AND scope_s.league_id=:league_id
             JOIN "Seasons" anchor_s ON anchor_s.id = m.season_id
             CROSS JOIN LATERAL (
                 VALUES (m.home_team_id), (m.away_team_id)
