@@ -50,86 +50,6 @@ class DatabaseSettings(BaseSettings):
         """Kiểm tra database có được cấu hình đầy đủ không"""
         return bool(self.host and self.user and self.dbname and self.password)
 
-class APIFootballSettings(BaseSettings):
-    """Cấu hình API Football với multiple keys và rotation (legacy support)"""
-    model_config = SettingsConfigDict(
-        env_file=str(ENV_FILE_PATH),
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"
-    )
-    
-    base_url: AnyUrl = Field(
-        default="https://v3.football.api-sports.io",
-        validation_alias="API_FOOTBALL_BASE_URL"
-    )
-    api_keys: List[str] = Field(
-        default_factory=list, 
-        validation_alias="API_FOOTBALL_KEY"
-    )  # Changed from List[SecretStr] to List[str]
-    
-    # Rate limiting config
-    requests_per_minute: int = Field(default=100, validation_alias="API_RATE_LIMIT", gt=0)
-    
-    @field_validator("base_url")
-    @classmethod
-    def validate_https(cls, value: AnyUrl) -> AnyUrl:
-        """Đảm bảo chỉ sử dụng HTTPS cho bảo mật"""
-        if not value or str(value).strip() == "":
-            raise ValueError("API base URL cannot be empty")
-        if value.scheme != "https":
-            raise ValueError("API base URL must use HTTPS for security")
-        return value
-
-    @field_validator("api_keys", mode="before")
-    @classmethod
-    def parse_api_keys(cls, value) -> List[str]:
-        # print("DEBUG validator input:", value, type(value))
-        """Xử lý nhiều định dạng API keys từ string hoặc list"""
-        if not value:
-            return []
-        # print(f"Test{value}")
-        if isinstance(value, str):
-            # Hỗ trợ cả comma và semicolon separators
-            keys = []
-            for separator in [",", ";"]:
-                if separator in value:
-                    keys = [k.strip() for k in value.split(separator) if k.strip()]
-                    break
-            else:
-                # Single key
-                keys = [value.strip()] if value.strip() else []
-            return [k for k in keys if k]
-        if isinstance(value, list):
-            result = []
-            for v in value:
-                if isinstance(v, str):
-                    result.append(v.strip())
-                elif v and str(v).strip():
-                    result.append(str(v).strip())
-            return result
-        return []
-
-    def get_random_key(self) -> str:
-        """Lấy ngẫu nhiên một API key với thread-safe rotation"""
-        if not self.api_keys:
-            raise ValueError("No API keys available - check API_FOOTBALL_KEY environment variable")
-        key = random.choice(self.api_keys)
-        # Safe logging - chỉ log masked version
-        if len(key) > 8:
-            masked_key = f"{key[:4]}...{key[-4:]}"
-        else:
-            masked_key = f"{key[:2]}...{key[-2:]}" if len(key) > 4 else "***"
-        try:
-            logging.debug(f"Using API key: {masked_key}")
-        except:
-            pass
-        return key
-
-    @property
-    def is_configured(self) -> bool:
-        """Kiểm tra API có được cấu hình đầy đủ không"""
-        return bool(self.base_url and self.api_keys)
 
 class SofascoreSettings(BaseSettings):
     """Cấu hình Sofascore API không chính thức - Enhanced for scraping"""
@@ -152,8 +72,7 @@ class SofascoreSettings(BaseSettings):
         validation_alias="SOFASCORE_WEB_URL"
     )
     
-    # Premier League tournament ID trên Sofascore
-    premier_league_id: int = Field(default=17, validation_alias="SOFASCORE_EPL_ID")
+    prematch_hours: float = Field(default=48, validation_alias="SOFASCORE_PREMATCH_HOURS", ge=0, le=168)
     
     # Rate limiting để tránh bị block
     requests_per_minute: int = Field(default=30, validation_alias="SOFASCORE_RATE_LIMIT", gt=0)  # Giảm xuống để an toàn
@@ -283,7 +202,7 @@ class SofascoreSettings(BaseSettings):
 
     @property
     def is_configured(self) -> bool:
-        return bool(self.base_url and self.web_base_url and self.premier_league_id > 0)
+        return bool(self.base_url and self.web_base_url)
 
 
 class ScrapingSettings(BaseSettings):
