@@ -34,9 +34,10 @@ class SofaScoreTransformer:
     trong lớp này phải an toàn, rõ ràng, log lỗi khi cần.
     """
 
-    def __init__(self):
+    def __init__(self, competition=None):
         """Lớp này không lưu trạng thái (stateless) - mỗi lần dùng để transform 1 trận."""
-        pass
+        from config.competitions import get_competition
+        self.competition = competition or get_competition()
 
     @staticmethod
     def _get_nested_value(data: Dict, path: str, default: Any = None) -> Any:
@@ -160,11 +161,12 @@ class SofaScoreTransformer:
             logger.warning(f"Không thể trích xuất năm từ mùa giải '{season_year_str}'.")
             return league, None
             
+        name, start_year, end_year = self.competition.season(season_year_str)
         season = ParsedSeason(
             external_id=season_data.get('id'),
-            name=f"{start_year}/{start_year + 1}",
+            name=name,
             start_year=start_year,
-            end_year=start_year + 1,
+            end_year=end_year,
             league=league
         )
         return league, season
