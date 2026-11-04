@@ -42,8 +42,7 @@ class PredictRequest(BaseModel):
     match_week: Optional[int] = Field(
         default=None,
         ge=1,
-        le=38,
-        description="Premier League matchweek. Required for a custom fixture.",
+        description="Competition round; validated against the selected league. Required for a custom fixture.",
     )
     include_feature_breakdown: bool = Field(
         default=False,
@@ -89,7 +88,7 @@ class ProbabilityBreakdown(BaseModel):
 
 
 class KeyFeatures(BaseModel):
-    """Top features driving this prediction (SHAP-based)."""
+    """Selected input values for context; these are not feature attributions."""
     home_elo: Optional[float] = None
     away_elo: Optional[float] = None
     elo_diff: Optional[float] = None
@@ -108,7 +107,7 @@ class PredictResponse(BaseModel):
     away_team_id: int
     home_team_name: str
     away_team_name: str
-    match_datetime: Optional[str] = None
+    match_datetime: Optional[datetime] = None
 
     probabilities: ProbabilityBreakdown
     predicted_outcome: str           # "H" | "D" | "A"
@@ -131,4 +130,4 @@ class PredictionRecord(BaseModel):
     away_win_prob: float
     actual_outcome: Optional[str] = None
     was_correct: Optional[bool] = None
-    created_at: str
+    created_at: datetime
