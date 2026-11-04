@@ -9,6 +9,8 @@ import pytest
 
 from ml.config import load_ml_config
 from ml.inference.predictor import ModelPredictor
+from config.competitions import get_competition
+from ml.features.contracts import feature_fingerprint
 
 
 class ConstantModel:
@@ -61,10 +63,12 @@ def test_invalid_ml_configuration_fails_before_training(tmp_path):
 def test_model_predictor_enforces_feature_order_and_probability_contract(tmp_path):
     path = tmp_path / "model.pkl"
     joblib.dump({
-        "schema_version": 1,
+        "schema_version": 2,
         "class_order": ["H", "D", "A"],
         "feature_names": ["elo", "form"],
-        "metadata": {"version": "v1", "training_config": load_ml_config().as_dict()},
+        "metadata": {"version": "v1", "training_config": load_ml_config().as_dict(),
+                     "competition": get_competition().as_dict(), "league": "epl",
+                     "feature_config_hash": feature_fingerprint(load_ml_config(), get_competition())},
         "model": ConstantModel(),
     }, path)
     predictor = ModelPredictor(path)
@@ -79,7 +83,7 @@ def test_model_predictor_enforces_feature_order_and_probability_contract(tmp_pat
 def test_model_predictor_rejects_artifact_without_feature_configuration(tmp_path):
     path = tmp_path / "old.pkl"
     joblib.dump({
-        "schema_version": 1,
+        "schema_version": 2,
         "class_order": ["H", "D", "A"],
         "feature_names": ["elo"],
         "metadata": {"version": "old"},
