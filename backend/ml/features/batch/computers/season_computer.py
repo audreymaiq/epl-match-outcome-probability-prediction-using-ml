@@ -31,14 +31,14 @@ class SeasonComputer(AbstractFeatureComputer):
     def name(self) -> str:
         return "TeamSeasonLocationStats"
 
-    def compute(self, session: Session, season_name: Optional[str] = None) -> int:
+    def compute(self, session: Session, season_name: Optional[str] = None, *, league_id=None, competition=None, config=None) -> int:
         logger.info(
             "Computing TeamSeasonLocationStats%s...",
             f" for season {season_name}" if season_name else " (all seasons)",
         )
 
         season_filter = ""
-        params: dict = {}
+        params: dict = {"league_id": league_id}
         if season_name:
             season_filter = "AND s.name = :season_name"
             params["season_name"] = season_name
@@ -61,7 +61,7 @@ class SeasonComputer(AbstractFeatureComputer):
                 CASE WHEN m.outcome = 'A' THEN 1 ELSE 0 END AS loss,
                 CASE WHEN m.away_goals = 0 THEN 1 ELSE 0 END AS clean_sheet,
                 CASE WHEN m.home_goals = 0 THEN 1 ELSE 0 END AS failed_to_score
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id AND scope_s.league_id=:league_id
             JOIN "Seasons" s ON s.id = m.season_id
             WHERE m.status = 'FINISHED' AND m.home_goals IS NOT NULL
               {season_filter}
@@ -80,7 +80,7 @@ class SeasonComputer(AbstractFeatureComputer):
                 CASE WHEN m.outcome = 'H' THEN 1 ELSE 0 END,
                 CASE WHEN m.home_goals = 0 THEN 1 ELSE 0 END,
                 CASE WHEN m.away_goals = 0 THEN 1 ELSE 0 END
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id AND scope_s.league_id=:league_id
             JOIN "Seasons" s ON s.id = m.season_id
             WHERE m.status = 'FINISHED' AND m.away_goals IS NOT NULL
               {season_filter}
@@ -106,6 +106,7 @@ class SeasonComputer(AbstractFeatureComputer):
                 hist.team_id   = anchor.team_id
                 AND hist.season_id = anchor.season_id
                 AND hist.location  = anchor.location
+                AND hist.season_id IN (SELECT id FROM "Seasons" WHERE league_id=:league_id)
                 AND hist.match_datetime < anchor.match_datetime
             GROUP BY anchor.match_id, hist.team_id, hist.season_id, hist.location
         )
@@ -116,7 +117,7 @@ class SeasonComputer(AbstractFeatureComputer):
             clean_sheets, failed_to_score, computed_at
         )
         SELECT
-            s.match_id, s.team_id, s.season_id, s.location,
+            s.match_id, s.team_id, s.season_id, s.location::"LocationType",
             s.matches_played, s.wins, s.draws, s.losses,
             s.goals_scored, s.goals_conceded, s.points, s.ppg,
             s.clean_sheets, s.failed_to_score, NOW()
