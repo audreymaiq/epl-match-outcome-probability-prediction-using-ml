@@ -35,6 +35,9 @@ from config.core_constants import MatchStatus, get_match_status_from_sofascore
 
 logger = logging.getLogger(__name__)
 
+from config.competitions import get_competition
+from providers.base.components import ComponentStatus
+
 PROVIDER_NAME = "sofascore"
 
 
@@ -71,6 +74,7 @@ class SofaScoreProvider(AbstractDataProvider):
 
         self._extractor = SofaScoreExtractor(config.sofascore, config.scraping)
         self._config = config
+        self.competition = getattr(config, "competition", None) or get_competition()
         self._request_count = 0
 
     @property
@@ -79,7 +83,10 @@ class SofaScoreProvider(AbstractDataProvider):
 
     @property
     def tournament_id(self) -> int:
-        return self._config.sofascore.premier_league_id
+        competition = getattr(self, "competition", None) or get_competition()
+        if self.name not in competition.providers:
+            raise ValueError(f"No {self.name} tournament configured for {competition.slug}")
+        return competition.providers[self.name]
 
     def list_seasons(self) -> List[tuple[str, int]]:
         """Resolve season IDs from the provider instead of a dated local table."""
@@ -92,12 +99,11 @@ class SofaScoreProvider(AbstractDataProvider):
         for item in response["seasons"]:
             year = item.get("year", "")
             try:
-                start = int(year.split("/")[0])
-                if start < 100:
-                    start += 2000 if start < 90 else 1900
+                competition = getattr(self, "competition", None) or get_competition()
+                season_name, _, _ = competition.season(year)
                 season_id = int(item["id"])
                 if season_id > 0:
-                    seasons.append((f"{start}/{start + 1}", season_id))
+                    seasons.append((season_name, season_id))
             except (KeyError, TypeError, ValueError):
                 logger.warning("Ignoring malformed SofaScore season: %s", item)
         if not seasons:
@@ -153,6 +159,7 @@ class SofaScoreProvider(AbstractDataProvider):
             if get_match_status_from_sofascore(status_type) not in {
                 MatchStatus.FINISHED,
                 MatchStatus.SCHEDULED,
+                MatchStatus.IN_PROGRESS,
                 MatchStatus.POSTPONED,
                 MatchStatus.CANCELLED,
                 MatchStatus.ABANDONED,
@@ -207,13 +214,15 @@ class SofaScoreProvider(AbstractDataProvider):
             return None
 
         is_finished = self._get_nested(detail, "event.status.type") == "finished"
+        kickoff = self._get_nested(detail, "event.startTimestamp")
+        prematch = kickoff is not None and 0 <= kickoff-time.time() <= self._config.sofascore.prematch_hours*3600
 
         # 2. Match statistics are not available before kickoff.
         incidents = (self._extractor.fetch_incidents(match_id, breaker=self._breaker) or {}) if is_finished else {}
 
         # 3. Lineups (squad availability, player data) - optional
         lineups: dict = {}
-        if include_lineups and is_finished:
+        if include_lineups and (is_finished or prematch):
             lineups = self._extractor.fetch_lineups(match_id, breaker=self._breaker) or {}
 
         # 4. Statistics (xG proxy, possession, shots) - optional
@@ -221,6 +230,14 @@ class SofaScoreProvider(AbstractDataProvider):
         if include_statistics and is_finished:
             statistics = self._extractor.fetch_statistics(match_id, breaker=self._breaker) or {}
 
+        sides = [lineups.get(side, {}) for side in ("home", "away")]
+        lineup_complete = all(isinstance(side.get("players"), list) and side["players"] for side in sides)
+        availability_complete = all(isinstance(side.get("missingPlayers"), list) for side in sides)
+        player_stats_complete = is_finished and lineup_complete and all(
+            isinstance(player.get("statistics"), dict) for side in sides for player in side["players"])
+        all_statistics = next((part for part in statistics.get("statistics", []) if part.get("period") == "ALL"), None)
+        not_requested = ComponentStatus.NOT_REQUESTED
+        unavailable = ComponentStatus.UNAVAILABLE
         bundle = RawMatchBundle(
             external_id=match_id,
             detail=detail,
@@ -228,6 +245,13 @@ class SofaScoreProvider(AbstractDataProvider):
             lineups=lineups,
             statistics=statistics,
             provider_name=self.name,
+            component_status={
+                "events": ComponentStatus.COMPLETE if isinstance(incidents.get("incidents"), list) else unavailable if is_finished else not_requested,
+                "lineups": ComponentStatus.COMPLETE if lineup_complete else unavailable if include_lineups and (is_finished or prematch) else not_requested,
+                "squad_availability": ComponentStatus.COMPLETE if availability_complete else unavailable if include_lineups and (is_finished or prematch) else not_requested,
+                "player_stats": ComponentStatus.COMPLETE if player_stats_complete else unavailable if include_lineups and is_finished else not_requested,
+                "team_stats": ComponentStatus.COMPLETE if all_statistics and all_statistics.get("groups") else unavailable if include_statistics and is_finished else not_requested,
+            },
         )
 
         completeness = bundle.completeness_score()
@@ -299,7 +323,7 @@ class SofaScoreTransformerAdapter(AbstractDataTransformer):
         """
         from elt_pipeline.transform.sofascore_transformer import SofaScoreTransformer
 
-        transformer = SofaScoreTransformer()
+        transformer = SofaScoreTransformer(getattr(self, "competition", None))
 
         # Map RawMatchBundle fields to the dict format SofaScoreTransformer expects
         raw_dict = {
@@ -310,7 +334,16 @@ class SofaScoreTransformerAdapter(AbstractDataTransformer):
         }
 
         try:
-            return transformer.transform_match_bundle(raw_dict)
+            parsed = transformer.transform_match_bundle(raw_dict)
+            if parsed is not None:
+                parsed.component_status = dict(raw_bundle.component_status)
+                parsed.raw_payload = raw_dict
+                for component, status in parsed.component_status.items():
+                    if status != ComponentStatus.COMPLETE:
+                        setattr(parsed, component, [])
+                if parsed.match.season.league.external_id != transformer.competition.providers[self.provider_name]:
+                    raise ValueError("Fixture belongs to a different tournament")
+            return parsed
         except Exception as exc:
             logger.error(
                 "SofaScore transform failed for match %d: %s",
