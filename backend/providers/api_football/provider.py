@@ -1,130 +1,137 @@
-# providers/api_football/provider.py
-"""
-API-Football Data Provider - implementation template, not active.
+"""API-SPORTS v3 adapter. Contract: https://www.api-football.com/documentation_v3."""
 
-This file demonstrates the Open/Closed principle:
-  - The orchestrator, loader, and feature pipeline are UNCHANGED
-  - Only this file needs to be implemented to add a new data source
-  - Register only after all extraction and transformation methods work
-
-HOW TO ACTIVATE:
-  1. Implement each NotImplementedError method below
-  2. Set PROVIDER=api_football in .env
-  3. Register the provider and transformer, then restart the pipeline
-
-API-Football docs: https://www.api-football.com/documentation-v3
-"""
-
-from __future__ import annotations
-
-import logging
-from typing import List, Optional, Any
-
-from providers.base.abstract_provider import (
-    AbstractDataProvider,
-    AbstractDataTransformer,
-    RawMatchBundle,
-    RawMatchSummary,
-)
+import os
+import time
+import httpx
+from config.competitions import get_competition
+from providers.base.abstract_provider import AbstractDataProvider, RawMatchSummary, RawMatchBundle
+from providers.base.components import ComponentStatus
+from providers.base.errors import ProviderUnavailableError
 from providers.base.provider_registry import ProviderRegistry
-
-logger = logging.getLogger(__name__)
-
-PROVIDER_NAME = "api_football"
+from providers.api_football.transformer import ApiFootballTransformer
 
 
 class ApiFootballProvider(AbstractDataProvider):
-    """
-    API-Football.com provider.
-
-    Endpoint mapping (analogous to SofaScore):
-      SofaScore                    → API-Football
-      ─────────────────────────────────────────────
-      SEASON_MATCHES               → GET /fixtures?league=39&season={year}
-      MATCH_DETAIL                 → GET /fixtures?id={id}
-      MATCH_INCIDENTS (goals/cards)→ GET /fixtures/events?fixture={id}
-      MATCH_LINEUPS                → GET /fixtures/lineups?fixture={id}
-      MATCH_STATISTICS             → GET /fixtures/statistics?fixture={id}
-
-    EPL league ID on API-Football: 39
-    """
+    name = "api_football"
 
     def __init__(self, config):
-        self._config = config
-        # API-Football uses Bearer token auth
-        # self._api_key = config.api_football.get_random_key()
+        self.competition = getattr(config, "competition", None) or get_competition()
+        if self.name not in self.competition.providers:
+            raise ValueError("API-Football tournament ID is not configured")
+        key = os.getenv("API_FOOTBALL_KEY")
+        if not key:
+            raise ValueError("API_FOOTBALL_KEY is required")
+        self._max_requests = int(os.getenv("API_FOOTBALL_MAX_REQUESTS", "1000"))
+        if self._max_requests < 1:
+            raise ValueError("API_FOOTBALL_MAX_REQUESTS must be positive")
+        self._settings = config.scraping
+        self._client = httpx.Client(base_url="https://v3.football.api-sports.io",
+            headers={"x-apisports-key": key},
+            timeout=httpx.Timeout(self._settings.read_timeout, connect=self._settings.connect_timeout))
+        self._coverage = {}
+        self._fixtures = {}
+        self._request_count = 0
 
     @property
-    def name(self) -> str:
-        return PROVIDER_NAME
+    def tournament_id(self):
+        return self.competition.providers[self.name]
 
-    @property
-    def tournament_id(self) -> int:
-        return 39
+    def _get(self, path, **params):
+        for attempt in range(self._settings.max_retries):
+            if self._request_count >= self._max_requests:
+                raise ProviderUnavailableError("API-Football request budget exhausted")
+            if self._request_count:
+                time.sleep(self._settings.min_delay)
+            self._request_count += 1
+            try:
+                response = self._client.get(path, params=params)
+                if 400 <= response.status_code < 500 and response.status_code != 429:
+                    raise ProviderUnavailableError(f"API-Football rejected access with HTTP {response.status_code}")
+                if response.status_code == 429 or response.status_code >= 500:
+                    if attempt+1 < self._settings.max_retries:
+                        time.sleep(min(self._settings.backoff_factor ** attempt, 30))
+                        continue
+                response.raise_for_status()
+            except httpx.TransportError:
+                if attempt+1 == self._settings.max_retries:
+                    raise RuntimeError("API-Football transport failed") from None
+                time.sleep(min(self._settings.backoff_factor ** attempt, 30))
+                continue
+            data = response.json()
+            if not isinstance(data, dict) or data.get("errors"):
+                raise ProviderUnavailableError("API-Football reported an API error; check credentials, subscription and quota")
+            if not isinstance(data.get("response"), list):
+                raise ValueError("Invalid API-Football response envelope")
+            paging = data.get("paging", {})
+            if paging.get("total", 1) != 1:
+                raise ValueError("Unexpected paginated fixture response; incomplete ingestion refused")
+            return data["response"]
+        raise RuntimeError("API-Football retry budget exhausted")
 
-    def list_seasons(self) -> List[tuple[str, int]]:
-        raise NotImplementedError("Map EPL season names to API-Football season years.")
+    def list_seasons(self):
+        entries = self._get("/leagues", id=self.tournament_id)
+        if len(entries) != 1 or entries[0]["league"]["id"] != self.tournament_id or entries[0]["league"]["type"] != "League":
+            raise ValueError("Expected one configured national league")
+        seasons = []
+        for season in entries[0]["seasons"]:
+            year = int(season["year"])
+            name, _, _ = self.competition.season(str(year))
+            seasons.append((name, year))
+            self._coverage[year] = season.get("coverage", {}).get("fixtures", {})
+        if not seasons:
+            raise ValueError("Provider returned no available seasons")
+        return sorted(set(seasons), reverse=True)
 
-    def health_check(self) -> bool:
-        """Ping API-Football status endpoint."""
-        raise NotImplementedError(
-            "ApiFootballProvider.health_check() not yet implemented. "
-            "See providers/api_football/provider.py for implementation guide."
-        )
+    def fetch_season_matches(self, tournament_id, season_id):
+        fixtures = self._get("/fixtures", league=tournament_id, season=season_id, timezone="UTC")
+        self._fixtures = {item["fixture"]["id"]: item for item in fixtures}
+        if len(self._fixtures) != len(fixtures):
+            raise ValueError("Duplicate fixture IDs in source response")
+        summaries = []
+        for item in fixtures:
+            fixture, teams = item["fixture"], item["teams"]
+            summaries.append(RawMatchSummary(fixture["id"], fixture["status"]["short"],
+                teams["home"]["id"], teams["away"]["id"], fixture.get("timestamp"), None, item))
+        return sorted(summaries, key=lambda item: item.start_timestamp or 0)
 
-    def fetch_season_matches(
-        self,
-        tournament_id: int,
-        season_id: int,
-    ) -> List[RawMatchSummary]:
-        """
-        Fetch all finished matches for a season.
+    def fetch_match_bundle(self, match_id, include_lineups=True, include_statistics=True):
+        item = self._fixtures.get(match_id)
+        if item is None:
+            entries = self._get("/fixtures", id=match_id, timezone="UTC")
+            if len(entries) != 1:
+                raise ValueError(f"Fixture {match_id} not found")
+            item = entries[0]
+        if item["league"]["id"] != self.tournament_id:
+            raise ValueError("Fixture belongs to a different competition")
+        coverage = self._coverage.get(int(item["league"]["season"]), {})
+        status = {name: ComponentStatus.NOT_REQUESTED for name in (
+            "events", "lineups", "squad_availability", "player_stats", "team_stats")}
+        parts = {}
+        for name, endpoint, enabled, covered in (
+            ("events", "/fixtures/events", True, coverage.get("events", False)),
+            ("lineups", "/fixtures/lineups", include_lineups, coverage.get("lineups", False)),
+            ("team_stats", "/fixtures/statistics", include_statistics, coverage.get("statistics_fixtures", False)),
+        ):
+            if not enabled or item["fixture"]["status"]["short"] != "FT":
+                parts[name] = {}
+            elif not covered:
+                parts[name] = {}
+                status[name] = ComponentStatus.UNAVAILABLE
+            else:
+                values = self._get(endpoint, fixture=match_id)
+                parts[name] = {"response": values}
+                # Coverage + an empty event list can legitimately mean no events.
+                # Empty lineups/statistics are unavailable, not authoritative deletion.
+                status[name] = ComponentStatus.COMPLETE if values or name == "events" else ComponentStatus.UNAVAILABLE
+                if values and name in {"lineups", "team_stats"}:
+                    expected = {item["teams"][side]["id"] for side in ("home", "away")}
+                    actual = {entry.get("team", {}).get("id") for entry in values}
+                    if actual != expected or len(values) != 2:
+                        status[name] = ComponentStatus.PARTIAL
+        return RawMatchBundle(match_id, item, parts["events"], parts["lineups"], parts["team_stats"], self.name, status)
 
-        API-Football uses year (e.g. 2023) as season identifier,
-        not an opaque season_id like SofaScore.
-        The season_id passed here is the SofaScore ID - the implementation
-        should derive the year from it or use a separate mapping.
-
-        Returns:
-            List of RawMatchSummary (provider-agnostic).
-        """
-        raise NotImplementedError(
-            "ApiFootballProvider.fetch_season_matches() not yet implemented."
-        )
-
-    def fetch_match_bundle(
-        self,
-        match_id: int,
-        include_lineups: bool = True,
-        include_statistics: bool = True,
-    ) -> Optional[RawMatchBundle]:
-        """
-        Fetch full data bundle for one match.
-        map API-Football fixture ID → match_id.
-        """
-        raise NotImplementedError(
-            "ApiFootballProvider.fetch_match_bundle() not yet implemented."
-        )
-
-
-class ApiFootballTransformerAdapter(AbstractDataTransformer):
-    """
-    Transforms API-Football raw bundles to ParsedMatchBundle.
-
-    When implementing: create an ApiFootballTransformer (analogous to
-    SofaScoreTransformer) that handles API-Football's JSON structure.
-    The field names differ but the canonical output is identical.
-    """
-
-    @property
-    def provider_name(self) -> str:
-        return PROVIDER_NAME
-
-    def transform(self, raw_bundle: RawMatchBundle) -> Optional[Any]:
-        raise NotImplementedError(
-            "ApiFootballTransformerAdapter.transform() not yet implemented."
-        )
+    def close(self):
+        self._client.close()
 
 
-# Register this pair only after its contract tests pass:
-# ProviderRegistry.register(PROVIDER_NAME, ApiFootballProvider, ApiFootballTransformerAdapter)
+ProviderRegistry.register("api_football", ApiFootballProvider, ApiFootballTransformer)
