@@ -1,9 +1,10 @@
 'use client'
 
-import Link from 'next/link'
+import Link from '@/components/competition-link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { Menu, X } from 'lucide-react'
+import { useCompetition } from '@/lib/competition'
 
 const navLinks = [
   { href: '/matches', label: 'Fixtures' },
@@ -14,6 +15,7 @@ const navLinks = [
 
 export function NavBar() {
   const pathname = usePathname()
+  const { competition, competitions, league, select } = useCompetition()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   function isActive(href: string) {
@@ -27,7 +29,7 @@ export function NavBar() {
           <span className="grid h-9 w-9 place-items-center bg-[var(--pl-purple)] font-mono text-sm font-black tracking-tighter text-white">90</span>
           <span className="leading-none">
             <span className="block text-[0.88rem] font-black tracking-[0.08em] text-white">MATCHDAY</span>
-            <span className="mt-1.5 block text-[0.58rem] font-semibold uppercase tracking-[0.11em] text-[var(--subtle)]">Premier League</span>
+            <span className="mt-1.5 block text-[0.58rem] font-semibold uppercase tracking-[0.11em] text-[var(--subtle)]">{competition?.name || 'Football'}</span>
           </span>
         </Link>
 
@@ -35,6 +37,8 @@ export function NavBar() {
           <Link href="/" aria-current={isActive('/') ? 'page' : undefined} className={`flex items-center border-b-2 px-1 text-xs font-bold transition-colors ${isActive('/') ? 'border-[var(--pl-green)] text-white' : 'border-transparent text-[var(--muted)] hover:text-white'}`}>Overview</Link>
           {navLinks.map(({ href, label }) => <Link key={href} href={href} aria-current={isActive(href) ? 'page' : undefined} className={`flex items-center border-b-2 px-1 text-xs font-bold transition-colors ${isActive(href) ? 'border-[var(--pl-green)] text-white' : 'border-transparent text-[var(--muted)] hover:text-white'}`}>{label}</Link>)}
         </nav>
+
+        {competitions.length > 1 && <label className="min-w-0 max-w-40"><span className="sr-only">Competition</span><select aria-label="Competition" className="field-control text-xs" value={league} onChange={(event) => select(event.target.value)}>{competitions.map((item) => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>}
 
         <button type="button" className="grid h-10 w-10 place-items-center border border-white/10 text-white hover:bg-white/[0.06] md:hidden" onClick={() => setMobileOpen((open) => !open)} aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileOpen} aria-controls="mobile-navigation">{mobileOpen ? <X size={18} /> : <Menu size={18} />}</button>
       </div>
