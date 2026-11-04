@@ -87,7 +87,7 @@ class EloConfig:
 
 
 # Singleton default config
-DEFAULT_CONFIG = EloConfig(**load_ml_config().elo)
+DEFAULT_CONFIG = EloConfig()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -102,8 +102,8 @@ class EloCalculator:
     State is managed by EloBuilder, not here.
     """
 
-    def __init__(self, config: EloConfig = DEFAULT_CONFIG):
-        self._cfg = config
+    def __init__(self, config: EloConfig | None = None):
+        self._cfg = config or EloConfig(**load_ml_config().elo)
 
     # ── Public interface ──────────────────────────────────────────────────────
 
