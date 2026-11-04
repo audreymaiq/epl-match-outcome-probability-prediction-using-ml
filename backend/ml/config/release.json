@@ -1,0 +1,5 @@
+{
+  "min_folds": 2,
+  "max_log_loss": 1.2,
+  "required_log_loss_improvement": 0.0
+}
