@@ -47,12 +47,20 @@ class EloBuilder:
     def __init__(
         self,
         session: Session,
-        config: EloConfig = DEFAULT_CONFIG,
+        config: EloConfig | None = None,
+        *, competition=None, ml_config=None,
     ):
+        from config.competitions import get_competition, competition_id
+        from ml.features.contracts import feature_fingerprint
+        self.competition = competition or get_competition()
+        settings = ml_config or load_ml_config()
+        config = config or EloConfig(**settings.elo)
+        self.league_id = competition_id(session, self.competition)
+        self.feature_hash = feature_fingerprint(settings, self.competition)
         self._db = session
         self._calc = EloCalculator(config)
         self._config = config
-        self._top_teams = frozenset(load_ml_config().features.top_teams)
+        self._top_teams = frozenset(settings.features.top_teams)
 
         # team_id → current ELO (updated as we process matches chronologically)
         self._ratings: Dict[int, float] = defaultdict(lambda: config.initial_elo)
@@ -108,7 +116,7 @@ class EloBuilder:
 
         # This is a full-history rebuild. Remove rows for matches that no longer
         # exist in the source data so feature lookups cannot use stale ratings.
-        self._db.execute(text('DELETE FROM "EloRatings"'))
+        self._db.execute(text('DELETE FROM "EloRatings" WHERE league_id=:id'), {"id": self.league_id})
         if not self._records:
             logger.info("EloRatings cleared: no finished matches are available.")
             return 0
@@ -122,11 +130,11 @@ class EloBuilder:
                 self._db.execute(text("""
                     INSERT INTO "EloRatings" (
                         team_id, match_id, match_date,
-                        elo_before, elo_after, k_factor, season
+                        elo_before, elo_after, k_factor, season, league_id, config_hash
                     )
                     VALUES (
                         :team_id, :match_id, :match_date,
-                        :elo_before, :elo_after, :k_factor, :season
+                        :elo_before, :elo_after, :k_factor, :season, :league_id, :config_hash
                     )
                     ON CONFLICT (team_id, match_date, match_id) DO UPDATE SET
                         elo_before = EXCLUDED.elo_before,
@@ -134,6 +142,7 @@ class EloBuilder:
                         k_factor   = EXCLUDED.k_factor,
                         updated_at = NOW()
                 """), {
+                    "league_id": self.league_id, "config_hash": self.feature_hash,
                     "team_id":   rec.team_id,
                     "match_id":  rec.match_id,
                     "match_date": rec.match_date,
@@ -204,9 +213,9 @@ class EloBuilder:
 
         # 3. Determine match importance flags
         try:
-            week = int(match_week) if match_week else 20
+            week = int(match_week) if match_week else self.competition.rounds // 2
         except (ValueError, TypeError):
-            week = 20
+            week = self.competition.rounds // 2
 
         home_name = self._team_names.get(home_id, "")
         away_name = self._team_names.get(away_id, "")
@@ -265,12 +274,12 @@ class EloBuilder:
                 s.name            AS season_name
             FROM "Matches" m
             JOIN "Seasons" s ON s.id = m.season_id
-            WHERE m.status = 'FINISHED'
+            WHERE m.status = 'FINISHED' AND s.league_id=:league_id
               AND m.home_goals IS NOT NULL
               AND m.away_goals IS NOT NULL
             ORDER BY m.match_datetime ASC, m.id ASC
         """
-        rows = self._db.execute(text(sql)).fetchall()
+        rows = self._db.execute(text(sql), {"league_id": self.league_id}).fetchall()
         return [
             {
                 "match_id":     r.match_id,
