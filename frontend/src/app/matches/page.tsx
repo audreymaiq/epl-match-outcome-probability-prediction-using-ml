@@ -1,5 +1,7 @@
 'use client'
 
+import { useCompetition } from '@/lib/competition'
+
 import { Suspense, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { CalendarDays, Search, SlidersHorizontal } from 'lucide-react'
@@ -9,6 +11,7 @@ import { MatchCard } from '@/components/match-card'
 import type { MatchesParams, Team } from '@/lib/types'
 
 function MatchesView({ initialTeam }: { initialTeam: string }) {
+  const { competition } = useCompetition()
   const [status, setStatus] = useState('')
   const [teamId, setTeamId] = useState(initialTeam)
   const [season, setSeason] = useState('')
@@ -25,7 +28,7 @@ function MatchesView({ initialTeam }: { initialTeam: string }) {
 
   return (
     <main className="page-frame pb-16 pt-8 sm:pt-12">
-      <PageHeading eyebrow="Premier League" title="Fixtures" description="Browse matches by club, season or status." action={pagination ? <div className="border-l border-[var(--border)] pl-4 text-right"><p className="font-mono text-lg font-bold text-white">{pagination.total.toLocaleString()}</p><p className="text-[0.65rem] text-[var(--muted)]">matches found</p></div> : undefined} />
+      <PageHeading eyebrow={competition?.name || 'Football'} title="Fixtures" description="Browse matches by club, season or status." action={pagination ? <div className="border-l border-[var(--border)] pl-4 text-right"><p className="font-mono text-lg font-bold text-white">{pagination.total.toLocaleString()}</p><p className="text-[0.65rem] text-[var(--muted)]">matches found</p></div> : undefined} />
       <section className="surface-quiet mb-6 p-4 sm:p-5" aria-label="Match filters">
         <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--muted)]"><SlidersHorizontal size={14} /> Refine fixtures</div>
         <div className="grid gap-3 sm:grid-cols-3">
