@@ -27,6 +27,10 @@ import pandas as pd
 from sqlalchemy import text
 from ml.inference.predictor import ModelPredictor
 from ml.config import parse_ml_config
+from config.competitions import get_competition, Competition
+from ml.features.contracts import feature_fingerprint, require_features
+import threading
+import os
 
 from api.schemas.prediction import (
     PredictRequest, PredictResponse, ProbabilityBreakdown, KeyFeatures,
@@ -46,12 +50,51 @@ class PredictionService:
 
     def __init__(self, model_path: Optional[Path] = None):
         self._predictor = ModelPredictor(model_path)
+        self.competition = get_competition()
+        self._fixed_path = model_path is not None or bool(os.getenv("MODEL_PATH"))
+        self._services = {}
+        self._catalog_lock = threading.RLock()
+
+    def for_competition(self, competition):
+        # Explicit artifacts bypass the deployment pointer for this service only.
+        if self._fixed_path or (self.is_loaded and "league" not in self.model_metadata):
+            if competition.slug != self.competition.slug:
+                raise PredictionFailedException("This artifact does not support the requested competition")
+            return self
+        from utils.db_connector import DatabaseConnector
+        from ml.registry import model_path, verified_manifest
+        with DatabaseConnector.session_scope() as session:
+            version = session.execute(text('SELECT model_version FROM "ModelDeployments" WHERE league_slug=:slug'), {"slug": competition.slug}).scalar_one_or_none()
+        if version is None:
+            empty = PredictionService(model_path=Path("__model_not_installed__"))
+            empty.competition = competition
+            return empty
+        with self._catalog_lock:
+            key = (competition.slug, version)
+            if key not in self._services:
+                try:
+                    verified_manifest(competition.slug, version)
+                except (OSError, ValueError, KeyError):
+                    logger.exception("Active model manifest is unavailable or invalid for %s", competition.slug)
+                    raise ModelNotLoadedException() from None
+                service = PredictionService(model_path(competition.slug, version))
+                service.competition = competition
+                service.load_model()
+                if not service.is_loaded:
+                    raise ModelNotLoadedException()
+                if service.model_metadata.get("league") != competition.slug:
+                    raise PredictionFailedException("Active artifact belongs to another competition")
+                self._services = {k: value for k, value in self._services.items() if k[0] != competition.slug}
+                self._services[key] = service
+            return self._services[key]
 
     def load_model(self) -> None:
         """
         Load model from disk. Called once at application startup.
         Raises RuntimeError if model file is missing.
         """
+        if not self._fixed_path:
+            return
         try:
             if not self._predictor.load():
                 logger.warning("Model file not found at %s. Predictions are unavailable.", self._predictor.path)
@@ -60,7 +103,7 @@ class PredictionService:
                             self._predictor.path, self.model_version, len(self._predictor.feature_names))
         except Exception as exc:
             logger.error("Failed to load model from %s: %s", self._predictor.path, exc, exc_info=True)
-            raise RuntimeError(f"Model loading failed: {exc}") from exc
+            self._load_error = type(exc).__name__
 
     @property
     def is_loaded(self) -> bool:
@@ -77,6 +120,16 @@ class PredictionService:
     @property
     def feature_names(self) -> list[str]:
         return list(self._predictor.feature_names)
+
+    def check_readiness(self, db_session) -> None:
+        if not self.is_loaded:
+            raise ModelNotLoadedException()
+        from ml.features.feature_extractor import FeatureExtractor
+        profile = Competition(**self.model_metadata["competition"])
+        if profile.fingerprint != self.competition.fingerprint or profile.slug != self.competition.slug:
+            raise ValueError("Active model does not match configured competition rules")
+        extractor = FeatureExtractor(db_session, parse_ml_config(self.model_metadata["training_config"]), profile)
+        require_features(db_session, extractor.league_id, extractor.feature_hash)
 
     def predict(
         self,
@@ -180,7 +233,9 @@ class PredictionService:
         The schema is required to exist before the API starts serving requests.
         """
         offset = (page - 1) * page_size
-        total = int(db_session.execute(text('SELECT COUNT(*) FROM "Predictions"')).scalar() or 0)
+        total = int(db_session.execute(text('''SELECT COUNT(*) FROM "Predictions" p
+            JOIN "Matches" m ON m.id=p.match_id JOIN "Seasons" s ON s.id=m.season_id
+            JOIN "Leagues" l ON l.id=s.league_id WHERE l.slug=:league'''), {"league": self.competition.slug}).scalar() or 0)
 
         if total == 0:
             return PagedResponse(
@@ -207,10 +262,12 @@ class PredictionService:
             JOIN "Matches" m ON m.id = p.match_id
             JOIN "Teams" ht ON ht.id = m.home_team_id
             JOIN "Teams" at ON at.id = m.away_team_id
+            JOIN "Seasons" scope_s ON scope_s.id=m.season_id
+            JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league
             ORDER BY p.created_at DESC
             LIMIT :limit OFFSET :offset
         """
-        rows = db_session.execute(text(sql), {"limit": page_size, "offset": offset}).fetchall()
+        rows = db_session.execute(text(sql), {"limit": page_size, "offset": offset, "league": self.competition.slug}).fetchall()
 
         items = [
             PredictionRecord(
@@ -251,7 +308,12 @@ class PredictionService:
         training_config = self._predictor.metadata.get("training_config")
         if training_config is None:
             raise ValueError("Model artifact has no feature configuration")
-        extractor = FeatureExtractor(db_session, config=parse_ml_config(training_config))
+        stored_profile = self._predictor.metadata.get("competition")
+        competition = Competition(**stored_profile) if stored_profile else self.competition
+        if competition.slug != self.competition.slug or competition.fingerprint != self.competition.fingerprint:
+            raise ValueError("Competition rules changed; retrain and deploy a compatible artifact")
+        extractor = FeatureExtractor(db_session, config=parse_ml_config(training_config), competition=competition)
+        require_features(db_session, extractor.league_id, extractor.feature_hash)
 
         if request.match_id is not None:
             meta = extractor.get_match_meta(request.match_id)
