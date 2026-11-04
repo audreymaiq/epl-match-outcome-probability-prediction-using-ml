@@ -28,13 +28,29 @@ class FeatureExtractor:
         df = extractor.extract_all_finished_matches()      # → DataFrame (N rows)
     """
 
-    def __init__(self, session: Session, config: Optional[MLConfig] = None):
+    def __init__(self, session: Session, config: Optional[MLConfig] = None, competition=None):
+        from config.competitions import get_competition
+        from ml.features.contracts import feature_fingerprint
+        self.competition = competition or get_competition()
+        self._league_id = None
         self._db = session
         self._config = config or load_ml_config()
         self._defaults = self._config.features.defaults
         self._elo_config = EloConfig(**self._config.elo)
         self._derbies = frozenset(frozenset(pair) for pair in self._config.features.derbies)
         self._top_teams = frozenset(self._config.features.top_teams)
+        self.feature_hash = feature_fingerprint(self._config, self.competition)
+
+    @property
+    def league_id(self):
+        if self._league_id is None:
+            from config.competitions import competition_id
+            self._league_id = competition_id(self._db, self.competition)
+        return self._league_id
+
+    def _execute(self, statement, parameters=None):
+        return self._db.execute(statement, {"league_id": self.league_id, "feature_hash": self.feature_hash, **(parameters or {})})
+
 
     # ── Public entry points ───────────────────────────────────────────────────
 
@@ -61,15 +77,15 @@ class FeatureExtractor:
         """
         if not season_name:
             raise ValueError("season_name is required for a custom fixture.")
-        if not 1 <= match_week <= 38:
-            raise ValueError("match_week must be between 1 and 38.")
+        if not 1 <= match_week <= self.competition.rounds:
+            raise ValueError(f"match_week must be between 1 and {self.competition.rounds}.")
         dt = datetime.fromisoformat(match_datetime)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        season = self._db.execute(text("""
+        season = self._execute(text("""
             SELECT s.id, s.name
             FROM "Seasons" s
-            WHERE s.name = :season_name
+            WHERE s.name = :season_name AND s.league_id = :league_id
             LIMIT 1
         """), {"season_name": season_name}).fetchone()
         if season is None:
@@ -78,16 +94,16 @@ class FeatureExtractor:
         away_team_name = self._get_team_name(away_team_id)
         if not home_team_name or not away_team_name:
             raise ValueError("Both team IDs must exist in the database.")
-        season_teams = self._db.execute(text("""
+        season_teams = self._execute(text("""
             SELECT COUNT(DISTINCT team_id) AS team_count
             FROM (
                 SELECT home_team_id AS team_id
-                FROM "Matches"
+                FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
                 WHERE season_id = :season_id
                   AND home_team_id IN (:home_id, :away_id)
                 UNION
                 SELECT away_team_id AS team_id
-                FROM "Matches"
+                FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
                 WHERE season_id = :season_id
                   AND away_team_id IN (:home_id, :away_id)
             ) AS participating_teams
@@ -141,7 +157,7 @@ class FeatureExtractor:
                 row = self._build_feature_row(meta)
                 rows.append(row)
             except Exception as exc:
-                logger.warning("Feature extraction failed for match %d: %s", meta.get("match_id"), exc)
+                raise RuntimeError(f"Feature extraction failed for match {meta.get('match_id')}; dataset creation aborted") from exc
 
             if (i + 1) % 100 == 0:
                 logger.info("  Processed %d / %d matches...", i + 1, len(matches))
@@ -165,51 +181,60 @@ class FeatureExtractor:
         home_id  = meta["home_team_id"]
         away_id  = meta["away_team_id"]
         dt       = meta["match_datetime"]
+        from zoneinfo import ZoneInfo
+        # Historical feeds lack trustworthy final-whistle publication timestamps.
+        # Excluding this local matchday avoids using earlier kickoffs' later results.
+        history_dt = dt.astimezone(ZoneInfo(self.competition.timezone)).replace(
+            hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         season_id = meta.get("season_id")
         referee_id = meta.get("referee_id")
 
         row: Dict[str, Any] = {
             "match_id":   match_id,
             "outcome":    meta.get("outcome"),    # target variable (None for future)
+            "match_datetime": dt,
+            "season_name": meta.get("season_name"),
+            "home_team_name": meta.get("home_team_name"),
+            "away_team_name": meta.get("away_team_name"),
         }
 
         # ── TIER 1: ELO ──────────────────────────────────────────────────────
-        elo_feats = self._features_elo(home_id, away_id, dt, meta.get("season_name"))
+        elo_feats = self._features_elo(home_id, away_id, history_dt, meta.get("season_name"))
         row.update(elo_feats)
 
         # ── TIER 1: Rolling Form ─────────────────────────────────────────────
-        home_form = self._features_form(home_id, dt, prefix="home", location_filter=None)
-        away_form = self._features_form(away_id, dt, prefix="away", location_filter=None)
+        home_form = self._features_form(home_id, history_dt, prefix="home", location_filter=None)
+        away_form = self._features_form(away_id, history_dt, prefix="away", location_filter=None)
         row.update(home_form)
         row.update(away_form)
-        row.update(self._features_form(home_id, dt, prefix="home_home", location_filter="Home"))
-        row.update(self._features_form(away_id, dt, prefix="away_away", location_filter="Away"))
+        row.update(self._features_form(home_id, history_dt, prefix="home_home", location_filter="Home"))
+        row.update(self._features_form(away_id, history_dt, prefix="away_away", location_filter="Away"))
 
         # ── TIER 1: Season cumulative stats ──────────────────────────────────
-        home_season = self._features_season(home_id, dt, season_id, prefix="home", location="Overall")
-        away_season = self._features_season(away_id, dt, season_id, prefix="away", location="Overall")
+        home_season = self._features_season(home_id, history_dt, season_id, prefix="home", location="Overall")
+        away_season = self._features_season(away_id, history_dt, season_id, prefix="away", location="Overall")
         row.update(home_season)
         row.update(away_season)
-        row.update(self._features_season(home_id, dt, season_id, prefix="home_home", location="Home"))
-        row.update(self._features_season(away_id, dt, season_id, prefix="away_away", location="Away"))
+        row.update(self._features_season(home_id, history_dt, season_id, prefix="home_home", location="Home"))
+        row.update(self._features_season(away_id, history_dt, season_id, prefix="away_away", location="Away"))
 
         # ── TIER 1: Head-to-head (BOTH directions) ──────────────────────────
-        row.update(self._features_h2h(home_id, away_id, dt))
+        row.update(self._features_h2h(home_id, away_id, history_dt))
 
         # ── TIER 2: Attack/Defense strength (Dixon-Coles style) ──────────────
-        row.update(self._features_attack_defense(home_id, away_id, dt, season_id))
+        row.update(self._features_attack_defense(home_id, away_id, history_dt, season_id))
 
         # ── TIER 2: Squad availability ────────────────────────────────────────
         row.update(self._features_squad(home_id, away_id, dt))
 
         # ── TIER 2: Referee tendencies ────────────────────────────────────────
-        row.update(self._features_referee(referee_id, dt))
+        row.update(self._features_referee(referee_id, history_dt))
 
         # ── TIER 2: Rest/fatigue ──────────────────────────────────────────────
         row.update(self._features_rest(home_id, away_id, dt))
 
         # ── TIER 3: Streaks ───────────────────────────────────────────────────
-        row.update(self._features_streaks(home_id, away_id, dt))
+        row.update(self._features_streaks(home_id, away_id, history_dt))
 
         # ── TIER 3: Derby / rivalry ───────────────────────────────────────────
         row.update(self._features_derby(home_id, away_id))
@@ -218,10 +243,10 @@ class FeatureExtractor:
         row.update(self._features_season_stage(meta.get("match_week"), dt))
 
         # ── TIER 3: Team-specific home advantage ─────────────────────────────
-        row.update(self._features_home_advantage(home_id, away_id, dt))
+        row.update(self._features_home_advantage(home_id, away_id, history_dt))
 
         # ── TIER 4: European competition fatigue ─────────────────────────────
-        row.update(self._features_european_fatigue(home_id, away_id, dt))
+        row.update(self._features_schedule_congestion(home_id, away_id, dt))
 
         # ── DERIVED: Cross-features (critical for accuracy) ──────────────────
         row.update(self._derived_features(row, home_form, away_form, home_season, away_season, elo_feats))
@@ -240,7 +265,7 @@ class FeatureExtractor:
         def rating_before_match(team_id: int) -> float:
             latest = self._get_latest_elo(team_id, dt)
             if latest is None:
-                return self._defaults["elo"]
+                return self._elo_config.initial_elo
             rating, previous_season = latest
             if season_name and previous_season != season_name:
                 return EloCalculator(self._elo_config).season_regression(rating)
@@ -267,11 +292,11 @@ class FeatureExtractor:
 
     def _get_latest_elo(self, team_id: int, before_dt: datetime) -> Optional[Tuple[float, str]]:
         """Get the most recent ELO rating for a team before the given datetime."""
-        row = self._db.execute(text("""
+        row = self._execute(text("""
             SELECT e.elo_after, e.season
             FROM "EloRatings" e
-            JOIN "Matches" m ON m.id = e.match_id
-            WHERE e.team_id = :tid
+            JOIN "Matches" m ON m.id = e.match_id JOIN "Seasons" scope_season ON scope_season.id=m.season_id AND scope_season.league_id=:league_id
+            WHERE e.team_id = :tid AND e.config_hash = :feature_hash
               AND m.match_datetime < :dt
             ORDER BY m.match_datetime DESC, m.id DESC
             LIMIT 1
@@ -315,7 +340,7 @@ class FeatureExtractor:
                     WHEN m.outcome = 'D' THEN 'D'
                     ELSE 'L'
                 END AS result
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_season ON scope_season.id=m.season_id AND scope_season.league_id=:league_id
             WHERE (m.home_team_id = :tid OR m.away_team_id = :tid)
               AND m.status = 'FINISHED'
               AND m.match_datetime < :dt
@@ -324,7 +349,7 @@ class FeatureExtractor:
             ORDER BY m.match_datetime DESC
             LIMIT :n
         """
-        rows = self._db.execute(text(sql), params).fetchall()
+        rows = self._execute(text(sql), params).fetchall()
 
         if not rows:
             return self._form_defaults(prefix)
@@ -457,7 +482,7 @@ class FeatureExtractor:
                         WHEN m.home_team_id=:tid AND m.away_goals=0 THEN 1
                         WHEN m.away_team_id=:tid AND m.home_goals=0 THEN 1
                         ELSE 0 END) AS cs
-                FROM "Matches" m
+                FROM "Matches" m JOIN "Seasons" scope_season ON scope_season.id=m.season_id AND scope_season.league_id=:league_id
                 WHERE (m.home_team_id=:tid OR m.away_team_id=:tid)
                   AND m.status = 'FINISHED'
                   AND m.match_datetime < :dt
@@ -479,7 +504,7 @@ class FeatureExtractor:
                     SUM(CASE WHEN m.outcome='D' THEN 1 ELSE 0 END) AS draws,
                     SUM(CASE WHEN m.outcome={outcome_loss} THEN 1 ELSE 0 END) AS losses,
                     SUM(CASE WHEN {goals_ag}=0 THEN 1 ELSE 0 END) AS cs
-                FROM "Matches" m
+                FROM "Matches" m JOIN "Seasons" scope_season ON scope_season.id=m.season_id AND scope_season.league_id=:league_id
                 WHERE m.{team_col}_team_id=:tid
                   AND m.status = 'FINISHED'
                   AND m.match_datetime < :dt
@@ -487,7 +512,7 @@ class FeatureExtractor:
                   {season_cond}
             """
 
-        row = self._db.execute(text(sql), params).fetchone()
+        row = self._execute(text(sql), params).fetchone()
 
         mp = int(row.mp or 0) if row else 0
         if mp < self._config.features.min_matches["season"]:
@@ -535,7 +560,7 @@ class FeatureExtractor:
             SELECT
                 m.home_team_id, m.away_team_id,
                 m.home_goals, m.away_goals, m.outcome
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_season ON scope_season.id=m.season_id AND scope_season.league_id=:league_id
             WHERE (
                 (m.home_team_id = :hid AND m.away_team_id = :aid)
                 OR
@@ -546,7 +571,7 @@ class FeatureExtractor:
             AND m.home_goals IS NOT NULL
             ORDER BY m.match_datetime DESC
         """
-        rows = self._db.execute(text(sql), {"hid": home_id, "aid": away_id, "dt": before_dt}).fetchall()
+        rows = self._execute(text(sql), {"hid": home_id, "aid": away_id, "dt": before_dt}).fetchall()
         total = len(rows)
 
         if total < self._config.features.min_matches["h2h"]:
@@ -648,13 +673,13 @@ class FeatureExtractor:
         lg_sql = f"""
             SELECT
                 AVG((home_goals + away_goals) / 2.0) AS lg_avg_scored
-            FROM "Matches"
+            FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
             WHERE status = 'FINISHED'
               AND match_datetime < :dt
               AND home_goals IS NOT NULL
               {season_cond}
         """
-        lg_row = self._db.execute(text(lg_sql), params).fetchone()
+        lg_row = self._execute(text(lg_sql), params).fetchone()
         lg_avg = float(lg_row.lg_avg_scored or self._defaults["form5_avg_scored"])
 
         def _team_strength(team_id: int) -> Tuple[float, float]:
@@ -662,7 +687,7 @@ class FeatureExtractor:
                 SELECT
                     AVG(CASE WHEN home_team_id=:tid THEN home_goals ELSE away_goals END) AS avg_scored,
                     AVG(CASE WHEN home_team_id=:tid THEN away_goals ELSE home_goals END) AS avg_conceded
-                FROM "Matches"
+                FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
                 WHERE (home_team_id=:tid OR away_team_id=:tid)
                   AND status = 'FINISHED'
                   AND match_datetime < :dt
@@ -671,7 +696,7 @@ class FeatureExtractor:
             """
             p = dict(params)
             p["tid"] = team_id
-            r = self._db.execute(text(t_sql), p).fetchone()
+            r = self._execute(text(t_sql), p).fetchone()
             avg_s = float(r.avg_scored or lg_avg)
             avg_c = float(r.avg_conceded or lg_avg)
             return avg_s / max(lg_avg, 0.01), avg_c / max(lg_avg, 0.01)
@@ -697,54 +722,27 @@ class FeatureExtractor:
 
     # ── TIER 2: Squad availability ────────────────────────────────────────────
 
-    def _features_squad(
-        self,
-        home_id: int,
-        away_id: int,
-        before_dt: datetime,
-    ) -> Dict[str, Any]:
+    def _features_squad(self, home_id: int, away_id: int, before_dt: datetime) -> Dict[str, Any]:
+        """Use only observations collected before the decision cutoff for this fixture.
+
+        Historical lineups fetched after a match cannot reconstruct pre-match
+        availability; missing coverage is represented explicitly.
         """
-        Use the most recent prior match's absence report as a proxy.
-
-        Current-match lineup data may be revised after kickoff, so using it in
-        historical training would break the pre-match information boundary.
-        """
-        def _count_absences(team_id: int) -> Tuple[int, bool]:
-            """Returns (total_absences, goalkeeper_absent)."""
-            sql = """
-                SELECT COUNT(*) AS cnt,
-                       SUM(CASE WHEN p.position = 'GK' THEN 1 ELSE 0 END) AS gk_cnt
-                FROM "SquadAvailability" sa
-                JOIN "Players" p ON p.id = sa.player_id
-                JOIN "Matches" m ON m.id = sa.match_id
-                WHERE sa.team_id = :tid
-                  AND m.id = (
-                      SELECT m2.id
-                      FROM "Matches" m2
-                      JOIN "SquadAvailability" sa2 ON sa2.match_id = m2.id
-                      WHERE sa2.team_id = :tid
-                        AND m2.match_datetime < :dt
-                      ORDER BY m2.match_datetime DESC, m2.id DESC
-                      LIMIT 1
-                  )
-            """
-            row = self._db.execute(text(sql), {"tid": team_id, "dt": before_dt}).fetchone()
-
-            cnt = int(row.cnt or 0) if row else 0
-            gk_absent = bool(row and row.gk_cnt and row.gk_cnt > 0)
-            return cnt, gk_absent
-
-        home_abs, home_gk = _count_absences(home_id)
-        away_abs, away_gk = _count_absences(away_id)
-
-        return {
-            "home_absences":          home_abs,
-            "away_absences":          away_abs,
-            "absence_diff":           home_abs - away_abs,
-            "home_gk_absent":         int(home_gk),
-            "away_gk_absent":         int(away_gk),
-            "total_absences":         home_abs + away_abs,
-        }
+        def availability(team_id):
+            row = self._execute(text('''SELECT a.absences, a.goalkeeper_absent
+                FROM "AvailabilityObservations" a
+                JOIN "Matches" m ON m.id=a.match_id
+                JOIN "Seasons" s ON s.id=m.season_id
+                WHERE a.team_id=:tid AND s.league_id=:league_id
+                  AND m.match_datetime=:dt AND a.observed_at<:dt
+                  AND a.observed_at<=CURRENT_TIMESTAMP
+                ORDER BY a.observed_at DESC LIMIT 1'''), {"tid": team_id, "dt": before_dt}).first()
+            return (int(row.absences), int(row.goalkeeper_absent), 1) if row else (0, 0, 0)
+        home, home_gk, home_known = availability(home_id)
+        away, away_gk, away_known = availability(away_id)
+        return {"home_absences": home, "away_absences": away, "absence_diff": home-away,
+                "home_gk_absent": home_gk, "away_gk_absent": away_gk, "total_absences": home+away,
+                "home_availability_known": home_known, "away_availability_known": away_known}
 
     # ── TIER 2: Referee bias ──────────────────────────────────────────────────
 
@@ -769,7 +767,7 @@ class FeatureExtractor:
                 ROUND(AVG(CASE WHEN m.outcome='D' THEN 1.0 ELSE 0.0 END)::NUMERIC, 4) AS draw_rate,
                 ROUND(AVG(yc.cnt)::NUMERIC, 3) AS avg_yc,
                 ROUND(AVG(rc.cnt)::NUMERIC, 3) AS avg_rc
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_season ON scope_season.id=m.season_id AND scope_season.league_id=:league_id
             LEFT JOIN LATERAL (
                 SELECT COUNT(*) AS cnt FROM "MatchEvents" e
                 WHERE e.match_id = m.id AND e.event_type = 'yellow card'
@@ -782,7 +780,7 @@ class FeatureExtractor:
               AND m.status = 'FINISHED'
               AND m.match_datetime < :dt
         """
-        row = self._db.execute(text(sql), {"rid": referee_id, "dt": before_dt}).fetchone()
+        row = self._execute(text(sql), {"rid": referee_id, "dt": before_dt}).fetchone()
         games = int(row.games or 0) if row else 0
 
         if games < self._config.features.min_matches["referee"]:
@@ -816,12 +814,12 @@ class FeatureExtractor:
         def _days_since_last(team_id: int) -> float:
             sql = """
                 SELECT MAX(match_datetime) AS last_dt
-                FROM "Matches"
+                FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
                 WHERE (home_team_id = :tid OR away_team_id = :tid)
                   AND status = 'FINISHED'
                   AND match_datetime < :dt
             """
-            row = self._db.execute(text(sql), {"tid": team_id, "dt": match_dt}).fetchone()
+            row = self._execute(text(sql), {"tid": team_id, "dt": match_dt}).fetchone()
             if not row or not row.last_dt:
                 return self._defaults["rest_days"]
             last = row.last_dt
@@ -863,14 +861,14 @@ class FeatureExtractor:
                         WHEN outcome='D' THEN 'D'
                         ELSE 'L'
                     END AS result
-                FROM "Matches"
+                FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
                 WHERE (home_team_id=:tid OR away_team_id=:tid)
                   AND status = 'FINISHED'
                   AND match_datetime < :dt
                 ORDER BY match_datetime DESC
                 LIMIT 10
             """
-            rows = self._db.execute(text(sql), {"tid": team_id, "dt": before_dt}).fetchall()
+            rows = self._execute(text(sql), {"tid": team_id, "dt": before_dt}).fetchall()
             results = [r.result for r in rows]
             if not results:
                 return {"win_streak": 0, "draw_streak": 0, "loss_streak": 0,
@@ -946,7 +944,7 @@ class FeatureExtractor:
         }
 
     def _get_team_name(self, team_id: int) -> str:
-        row = self._db.execute(
+        row = self._execute(
             text('SELECT name FROM "Teams" WHERE id = :id'), {"id": team_id}
         ).fetchone()
         return row.name if row else ""
@@ -957,25 +955,26 @@ class FeatureExtractor:
         self, match_week: Optional[str], dt: datetime
     ) -> Dict[str, Any]:
         """
-        EPL season has 38 rounds.
+        Season stage follows the configured competition rules.
         Stage affects tactical approach and home advantage.
         """
         try:
-            week = int(match_week) if match_week else 19
+            week = int(match_week) if match_week else self.competition.rounds // 2
         except (ValueError, TypeError):
-            week = 19
+            week = self.competition.rounds // 2
 
-        week_normalized = week / 38.0
+        week_normalized = week / self.competition.rounds
 
-        if week <= 10:
+        if week_normalized <= self.competition.early_fraction:
             stage = 0   # Early
-        elif week <= 28:
+        elif week_normalized <= self.competition.late_fraction:
             stage = 1   # Mid
         else:
             stage = 2   # Business end / run-in
 
-        month = dt.month
-        is_winter = int(month in (11, 12, 1, 2))
+        from zoneinfo import ZoneInfo
+        month = dt.astimezone(ZoneInfo(self.competition.timezone)).month
+        is_winter = int(month in self.competition.winter_months)
 
         return {
             "match_week":           week,
@@ -994,12 +993,12 @@ class FeatureExtractor:
             sql = """
                 WITH home_ppg AS (
                     SELECT AVG(CASE WHEN outcome='H' THEN 3 WHEN outcome='D' THEN 1 ELSE 0 END) AS ppg
-                    FROM "Matches"
+                    FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
                     WHERE home_team_id=:tid AND status='FINISHED' AND match_datetime<:dt
                 ),
                 away_ppg AS (
                     SELECT AVG(CASE WHEN outcome='A' THEN 3 WHEN outcome='D' THEN 1 ELSE 0 END) AS ppg
-                    FROM "Matches"
+                    FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
                     WHERE away_team_id=:tid AND status='FINISHED' AND match_datetime<:dt
                 )
                 SELECT
@@ -1007,7 +1006,7 @@ class FeatureExtractor:
                     COALESCE(a.ppg, :league_ppg) AS away_ppg
                 FROM home_ppg h, away_ppg a
             """
-            row = self._db.execute(text(sql), {
+            row = self._execute(text(sql), {
                 "tid": team_id, "dt": before_dt,
                 "league_ppg": self._defaults["season_ppg"],
             }).fetchone()
@@ -1026,21 +1025,21 @@ class FeatureExtractor:
 
     # ── TIER 4: European competition fatigue ─────────────────────────────────
 
-    def _features_european_fatigue(
+    def _features_schedule_congestion(
         self, home_id: int, away_id: int, match_dt: datetime
     ) -> Dict[str, Any]:
-        """Detect if a team played a European/cup match recently."""
+        """Count recent matches within the configured competition; no claim of European/cup coverage."""
         def _played_midweek(team_id: int) -> int:
             week_ago = match_dt - timedelta(days=7)
             sql = """
                 SELECT COUNT(*) AS cnt
-                FROM "Matches"
+                FROM "Matches" scope_match JOIN "Seasons" scope_season ON scope_season.id=scope_match.season_id AND scope_season.league_id=:league_id
                 WHERE (home_team_id=:tid OR away_team_id=:tid)
                   AND match_datetime >= :week_ago
                   AND match_datetime < :dt
                   AND status = 'FINISHED'
             """
-            row = self._db.execute(
+            row = self._execute(
                 text(sql), {"tid": team_id, "week_ago": week_ago, "dt": match_dt}
             ).fetchone()
             return int(row.cnt or 0)
@@ -1051,9 +1050,9 @@ class FeatureExtractor:
         return {
             "home_matches_last_7_days":  home_recent,
             "away_matches_last_7_days":  away_recent,
-            "home_european_fatigue":     int(home_recent >= 2),
-            "away_european_fatigue":     int(away_recent >= 2),
-            "european_fatigue_advantage": int(away_recent >= 2) - int(home_recent >= 2),
+            "home_congested_schedule":     int(home_recent >= 2),
+            "away_congested_schedule":     int(away_recent >= 2),
+            "schedule_congestion_advantage": int(away_recent >= 2) - int(home_recent >= 2),
         }
 
     # ── DERIVED: Cross-features (critical for accuracy) ──────────────────────
@@ -1149,13 +1148,13 @@ class FeatureExtractor:
                 s.name AS season_name,
                 ht.name AS home_team_name,
                 at.name AS away_team_name
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_season ON scope_season.id=m.season_id AND scope_season.league_id=:league_id
             JOIN "Seasons" s ON s.id = m.season_id
             JOIN "Teams" ht ON ht.id = m.home_team_id
             JOIN "Teams" at ON at.id = m.away_team_id
             WHERE m.id = :mid
         """
-        row = self._db.execute(text(sql), {"mid": match_id}).fetchone()
+        row = self._execute(text(sql), {"mid": match_id}).fetchone()
         if not row:
             return None
 
@@ -1205,14 +1204,14 @@ class FeatureExtractor:
                 s.name AS season_name,
                 ht.name AS home_team_name,
                 at.name AS away_team_name
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_season ON scope_season.id=m.season_id AND scope_season.league_id=:league_id
             JOIN "Seasons" s ON s.id = m.season_id
             JOIN "Teams" ht  ON ht.id = m.home_team_id
             JOIN "Teams" at  ON at.id = m.away_team_id
             {where}
             ORDER BY m.match_datetime ASC
         """
-        rows = self._db.execute(text(sql), params).fetchall()
+        rows = self._execute(text(sql), params).fetchall()
         result = []
         for row in rows:
             dt = row.match_datetime
