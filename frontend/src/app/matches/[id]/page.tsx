@@ -1,7 +1,7 @@
 'use client'
 
 import { useParams } from 'next/navigation'
-import Link from 'next/link'
+import Link from '@/components/competition-link'
 import { useEffect, useState } from 'react'
 import { useMatch, usePredict } from '@/lib/hooks'
 import { ProbabilityBars } from '@/components/probability-bars'
