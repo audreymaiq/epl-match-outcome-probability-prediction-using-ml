@@ -19,6 +19,9 @@ import signal
 import logging
 import argparse
 import threading
+import copy
+from config.competitions import Competition, get_competition
+from providers.base.errors import ProviderUnavailableError
 from datetime import datetime
 from typing import List, Optional, TypedDict
 
@@ -65,8 +68,14 @@ class ETLOrchestrator:
         provider: AbstractDataProvider,
         transformer: AbstractDataTransformer,
         batch_size: int = 50,
+        competition: Competition | None = None,
+        mode: str = "full",
+        refresh_days: int = 7,
     ):
         self._provider = provider
+        self.competition = competition
+        self.mode = mode
+        self.refresh_days = refresh_days
         self._transformer = transformer
         self._batch_size = batch_size
         self._shutdown = threading.Event()
@@ -119,6 +128,8 @@ class ETLOrchestrator:
         # ── 3. Extract + Transform each match ─────────────────────────────────
         parsed_bundles: List[ParsedMatchBundle] = []
         load_result = {"success": 0, "failed": 0, "total": 0}
+        from elt_pipeline.incremental import settled_matches, can_skip, summary_fingerprint
+        known = settled_matches(self._provider.name, self.competition) if self.mode == "incremental" and self.competition else {}
 
         for i, summary in enumerate(summaries):
             if self._shutdown.is_set():
@@ -126,6 +137,10 @@ class ETLOrchestrator:
                 break
 
             match_id = summary.external_id
+            if known and can_skip(summary, known, self.refresh_days):
+                load_result["success"] += 1
+                load_result["total"] += 1
+                continue
             logger.info("[%d/%d] Processing match %d", i + 1, len(summaries), match_id)
 
             try:
@@ -135,10 +150,16 @@ class ETLOrchestrator:
 
                 parsed = self._transformer.transform(raw_bundle)
                 if parsed:
+                    if isinstance(parsed, ParsedMatchBundle):
+                        parsed.summary_hash = summary_fingerprint(summary)
+                        if self.competition and parsed.match.season.name != season_name:
+                            raise ValueError("Fixture season differs from the requested season")
                     parsed_bundles.append(parsed)
                 else:
                     logger.warning("Transform returned None for match %d.", match_id)
 
+            except ProviderUnavailableError:
+                raise
             except NotImplementedError as e:
                 logger.error("Transformer not implemented: %s", e)
                 break
@@ -176,7 +197,7 @@ class ETLOrchestrator:
             from utils.db_connector import DatabaseConnector
 
             with DatabaseConnector.session_scope() as session:
-                loader = MatchLoader(session, source_system=self._provider.name)
+                loader = MatchLoader(session, source_system=self._provider.name, competition=self.competition)
                 result = loader.bulk_load(bundles)
             logger.info("Batch loaded: %d success, %d failed.", result["success"], result["failed"])
             return result
@@ -202,6 +223,11 @@ class ETLOrchestrator:
 def run_pipeline(
     provider_name: str,
     specific_seasons: Optional[List[str]] = None,
+    *,
+    league: str | None = None,
+    season_count: int | None = None,
+    mode: str = "full",
+    refresh_days: int = 7,
 ) -> PipelineResult:
     from config.settings import get_config
     from utils.db_connector import DatabaseConnector
@@ -217,7 +243,15 @@ def run_pipeline(
     # Load all provider modules (triggers self-registration)
     discover_providers()
 
-    config = get_config()
+    if specific_seasons and season_count is not None:
+        raise ValueError("Use specific seasons or season_count, not both")
+    if season_count is not None and (type(season_count) is not int or season_count < 1):
+        raise ValueError("season_count must be a positive integer")
+    config = copy.copy(get_config())
+    if mode not in {"full", "incremental"} or type(refresh_days) is not int or refresh_days < 0:
+        raise ValueError("Invalid ingestion mode or refresh_days")
+    competition = get_competition(league)
+    config.competition = competition
 
     if not ProviderRegistry.is_registered(provider_name):
         logger.critical("Provider '%s' not registered. Available: %s",
@@ -227,14 +261,8 @@ def run_pipeline(
     provider = ProviderRegistry.create(provider_name, config)
     transformer = ProviderRegistry.create_transformer(provider_name)
 
-    orchestrator = ETLOrchestrator(provider, transformer)
-
-    # Wire graceful shutdown to orchestrator
-    def _shutdown_handler(signum, frame):
-        orchestrator.request_shutdown()
-
-    signal.signal(signal.SIGINT, _shutdown_handler)
-    signal.signal(signal.SIGTERM, _shutdown_handler)
+    transformer.competition = competition
+    orchestrator = ETLOrchestrator(provider, transformer, competition=competition, mode=mode, refresh_days=refresh_days)
 
     try:
         if not DatabaseConnector.check_connection():
@@ -243,7 +271,7 @@ def run_pipeline(
 
         all_seasons = provider.list_seasons()
         if specific_seasons:
-            requested = set(specific_seasons)
+            requested = {competition.season(name)[0] for name in specific_seasons}
             recognized = {name for name, _ in all_seasons}
             recognized.update(f"{name[:4]}/{name[-2:]}" for name, _ in all_seasons)
             unknown = requested - recognized
@@ -253,7 +281,11 @@ def run_pipeline(
             seasons = [season for season in all_seasons if season[0] in requested or
                        f"{season[0][:4]}/{season[0][-2:]}" in requested]
         else:
-            seasons = all_seasons[:config.seasons.seasons_to_fetch]
+            requested_count = season_count or int(os.getenv("SEASONS_TO_FETCH", str(competition.season_count)))
+            if season_count is not None and len(all_seasons) < requested_count:
+                logger.error("Requested %d seasons, provider only offers %d", requested_count, len(all_seasons))
+                return result
+            seasons = all_seasons[:requested_count]
 
         if not seasons:
             logger.error("No seasons to process.")
@@ -298,7 +330,10 @@ def main() -> int:
         help="Data provider to use (default: sofascore). "
              "Set PROVIDER in .env to override permanently.",
     )
-    parser.add_argument("--seasons", nargs="+", metavar="SEASON",
+    parser.add_argument("--league", default=None)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--season-count", type=int, default=None)
+    selection.add_argument("--seasons", nargs="+", metavar="SEASON",
                         help='Seasons to process, e.g. "2023/24" "2022/23"')
     parser.add_argument("--log-level", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -310,7 +345,7 @@ def main() -> int:
     logger.info("ELT Pipeline | Provider: %s", args.provider)
     logger.info("=" * 60)
 
-    result = run_pipeline(args.provider, args.seasons)
+    result = run_pipeline(args.provider, args.seasons, league=args.league, season_count=args.season_count)
 
     if result["success"]:
         logger.info("Pipeline completed. %d/%d matches loaded.",
