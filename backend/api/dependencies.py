@@ -15,7 +15,8 @@ from functools import lru_cache
 from typing import Generator, TYPE_CHECKING
 
 from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Query
+from config.competitions import get_competition
 
 from utils.db_connector import DatabaseConnector
 
@@ -27,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 
 # ── Database session ──────────────────────────────────────────────────────────
+
+def get_competition_dep(league: str | None = Query(None)):
+    try:
+        return get_competition(league)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 def get_db() -> Generator[Session, None, None]:
     """
@@ -75,8 +82,9 @@ def get_model_service() -> "ModelService":
 
 def get_prediction_svc(
     svc: "PredictionService" = Depends(get_prediction_service),
+    competition=Depends(get_competition_dep),
 ) -> "PredictionService":
-    return svc
+    return svc.for_competition(competition)
 
 
 def get_model_svc(
