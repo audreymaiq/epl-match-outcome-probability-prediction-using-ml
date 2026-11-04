@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
+from providers.base.components import ComponentStatus
 
 from config.core_constants import MatchStatus, PlayerPosition, MatchOutcome, PlayerStatus, MatchEventType, MatchPeriod
 
@@ -196,3 +197,6 @@ class ParsedMatchBundle:
     squad_availability: List[ParsedSquadAvailability] = field(default_factory=list)
     player_stats: List[ParsedMatchPlayerStats] = field(default_factory=list)
     team_stats: List[ParsedMatchTeamStats] = field(default_factory=list)
+    component_status: Dict[str, ComponentStatus] = field(default_factory=dict)
+    raw_payload: Dict[str, Any] = field(default_factory=dict)
+    summary_hash: Optional[str] = None
