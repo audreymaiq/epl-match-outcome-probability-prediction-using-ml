@@ -1,85 +1,55 @@
-# ══════════════════════════════════════════════════════════════════════════════
-# Makefile - Premier League Match Outcome Probability Prediction
-# ══════════════════════════════════════════════════════════════════════════════
-
 .DEFAULT_GOAL := help
-SHELL := /bin/bash
+PYTHON ?= python
+LEAGUE ?= epl
+SOURCE ?= sofascore
+SEASON_COUNT ?= 7
+CLI = docker compose --profile operations run --rm cli
 
-# ── Docker ────────────────────────────────────────────────────────────────────
+.PHONY: help up down logs ps migrate pipeline ingest features train status test test-backend test-frontend check-frontend
 
-.PHONY: up down restart logs ps
+help:
+	@echo "up, down, logs, ps, migrate, pipeline, ingest, features, train, status"
+	@echo "test, test-backend, test-frontend, check-frontend"
+	@echo "Options: LEAGUE=epl SOURCE=sofascore SEASON_COUNT=7 PYTHON=python"
+	@echo "Training creates a candidate. Activate explicitly with the football CLI."
 
-up: ## Start all core services
-	docker compose up -d
+up:
+	docker compose up -d --build
 
-down: ## Stop all services
+down:
 	docker compose down
 
-restart: ## Restart all services
-	docker compose restart
-
-logs: ## Tail logs (all services)
+logs:
 	docker compose logs -f
 
-ps: ## Show running services
+ps:
 	docker compose ps
 
-# ── Pipeline ──────────────────────────────────────────────────────────────────
+migrate:
+	$(CLI) migrate
 
-.PHONY: pipeline features train
+pipeline:
+	$(CLI) pipeline run --league $(LEAGUE) --source $(SOURCE) --season-count $(SEASON_COUNT)
 
-pipeline: ## Run ELT pipeline (fetch match data)
-	docker compose --profile pipeline run --rm pipeline
+ingest:
+	$(CLI) ingest --league $(LEAGUE) --source $(SOURCE) --season-count $(SEASON_COUNT)
 
-features: ## Compute all ML features
-	docker compose --profile pipeline run --rm features
+features:
+	$(CLI) features --league $(LEAGUE)
 
-train: ## Train the ensemble model (walk-forward CV)
-	docker compose --profile training run --rm train
-	docker compose restart api
+train:
+	$(CLI) train --league $(LEAGUE)
 
-# ── Development ───────────────────────────────────────────────────────────────
+status:
+	$(CLI) pipeline status --league $(LEAGUE)
 
-.PHONY: test test-backend test-frontend lint
+test: test-backend test-frontend
 
-test: test-backend test-frontend ## Run all tests
+test-backend:
+	cd backend && $(PYTHON) -m pytest tests -q
 
-test-backend: ## Run backend Python tests
-	cd backend && PYTHONPATH=. python -m pytest tests/ -v
+test-frontend:
+	cd frontend && npm test
 
-test-frontend: ## Type-check and build frontend
-	cd frontend && npm run build
-
-lint: ## Lint backend code
-	cd backend && python -m flake8 api/ ml/ providers/ --max-line-length 120
-
-# ── Database ──────────────────────────────────────────────────────────────────
-
-.PHONY: db-shell db-reset
-
-db-shell: ## Open psql shell
-	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
-
-db-reset: ## Reset database (DESTRUCTIVE)
-	docker compose down -v
-	docker compose up -d postgres
-	@echo "Waiting for postgres..."
-	sleep 5
-	@echo "Database reset complete. Run 'make pipeline' to reload data."
-
-# ── Cleanup ───────────────────────────────────────────────────────────────────
-
-.PHONY: clean
-
-clean: ## Remove runtime artifacts
-	find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	rm -f backend/cache/*.sqlite backend/logs/*.log
-	rm -rf frontend/.next
-
-# ── Help ──────────────────────────────────────────────────────────────────────
-
-.PHONY: help
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
-
+check-frontend:
+	cd frontend && npm run typecheck && npm run lint && npm run build
