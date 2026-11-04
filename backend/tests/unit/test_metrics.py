@@ -130,7 +130,7 @@ class TestROISimulation:
         rng = np.random.default_rng(3)
         y_true = rng.integers(0, 3, size=50)
         y_proba = rng.dirichlet(np.ones(3), size=50)
-        result = compute_roi_simulation(y_true, y_proba)
+        result = compute_roi_simulation(y_true, y_proba, odds=np.full((50, 3), 3.0))
         for key in ["n_matches", "model_bets", "model_roi_pct", "home_always_roi_pct"]:
             assert key in result
 
@@ -138,15 +138,24 @@ class TestROISimulation:
         rng = np.random.default_rng(4)
         y_true = rng.integers(0, 3, size=80)
         y_proba = rng.dirichlet(np.ones(3), size=80)
-        result = compute_roi_simulation(y_true, y_proba)
+        result = compute_roi_simulation(y_true, y_proba, odds=np.full((80, 3), 3.0))
         assert result["n_matches"] == 80
 
     def test_model_bets_le_n(self):
         rng = np.random.default_rng(5)
         y_true = rng.integers(0, 3, size=60)
         y_proba = rng.dirichlet(np.ones(3), size=60)
-        result = compute_roi_simulation(y_true, y_proba, threshold=0.5)
+        result = compute_roi_simulation(y_true, y_proba, odds=np.full((60, 3), 3.0), threshold=0.5)
         assert result["model_bets"] <= 60
+
+    def test_roi_rejects_missing_observed_odds(self):
+        with pytest.raises(ValueError, match="Observed pre-decision odds"):
+            compute_roi_simulation(np.array([0]), np.array([[0.5, 0.3, 0.2]]))
+
+    def test_calibration_includes_zero_probability_in_first_bin(self):
+        _, _, counts = compute_calibration_curve(np.array([1, 0]), np.array([[0., 1., 0.], [1., 0., 0.]]))
+        assert counts.sum() == 2
+        assert counts[0] == counts[-1] == 1
 
 
 class TestEvaluationReport:
