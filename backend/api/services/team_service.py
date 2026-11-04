@@ -22,8 +22,13 @@ logger = logging.getLogger(__name__)
 
 class TeamService:
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, competition=None):
+        from config.competitions import get_competition
+        self.competition = competition or get_competition()
         self._db = session
+
+    def _execute(self, statement, parameters=None):
+        return self._db.execute(statement, {"league_slug": self.competition.slug, **(parameters or {})})
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -33,7 +38,9 @@ class TeamService:
         page: int = 1,
         page_size: int = 50,
     ) -> Tuple[List[TeamSchema], int]:
-        filters = []
+        filters = ['''EXISTS (SELECT 1 FROM "Matches" sm JOIN "Seasons" ss ON ss.id=sm.season_id
+            JOIN "Leagues" sl ON sl.id=ss.league_id WHERE sl.slug=:league_slug
+            AND (sm.home_team_id=t.id OR sm.away_team_id=t.id))''']
         params: dict = {"limit": page_size, "offset": (page - 1) * page_size}
         if search:
             filters.append("LOWER(t.name) LIKE :search")
@@ -53,8 +60,8 @@ class TeamService:
         """
         count_sql = f'SELECT COUNT(*) FROM "Teams" t {where}'
 
-        rows = self._db.execute(text(sql), params).fetchall()
-        total = self._db.execute(
+        rows = self._execute(text(sql), params).fetchall()
+        total = self._execute(
             text(count_sql),
             {k: v for k, v in params.items() if k not in ("limit", "offset")},
         ).scalar()
@@ -77,9 +84,13 @@ class TeamService:
                 s.name AS stadium_name, s.capacity
             FROM "Teams" t
             LEFT JOIN "Stadiums" s ON s.id = t.stadium_id
-            WHERE t.id = :tid
+            WHERE t.id = :tid AND EXISTS (
+                SELECT 1 FROM "Matches" m JOIN "Seasons" season ON season.id=m.season_id
+                JOIN "Leagues" league ON league.id=season.league_id
+                WHERE league.slug=:league_slug AND (m.home_team_id=t.id OR m.away_team_id=t.id)
+            )
         """
-        row = self._db.execute(text(sql), {"tid": team_id}).fetchone()
+        row = self._execute(text(sql), {"tid": team_id}).fetchone()
         if not row:
             raise NotFoundException("Team", team_id)
 
@@ -139,29 +150,25 @@ class TeamService:
 
     def get_h2h(self, home_team_id: int, away_team_id: int) -> H2HResponse:
         """Get all-time head-to-head stats + 5 most recent meetings."""
-        # Validate both teams exist
+        # Both teams must participate in the requested competition.
         for tid in (home_team_id, away_team_id):
-            exists = self._db.execute(
-                text('SELECT 1 FROM "Teams" WHERE id = :id'), {"id": tid}
-            ).scalar()
-            if not exists:
-                raise NotFoundException("Team", tid)
+            self._get_team_brief(tid)
 
         h2h_sql = """
             SELECT
                 COUNT(*)                                             AS total,
-                SUM(CASE WHEN outcome = 'H' THEN 1 ELSE 0 END)     AS hw,
+                SUM(CASE WHEN (home_team_id=:hid AND outcome='H') OR (away_team_id=:hid AND outcome='A') THEN 1 ELSE 0 END) AS hw,
                 SUM(CASE WHEN outcome = 'D' THEN 1 ELSE 0 END)     AS draws,
-                SUM(CASE WHEN outcome = 'A' THEN 1 ELSE 0 END)     AS aw,
-                ROUND(AVG(home_goals)::NUMERIC, 2)                  AS avg_hg,
-                ROUND(AVG(away_goals)::NUMERIC, 2)                  AS avg_ag,
+                SUM(CASE WHEN (home_team_id=:aid AND outcome='H') OR (away_team_id=:aid AND outcome='A') THEN 1 ELSE 0 END) AS aw,
+                ROUND(AVG(CASE WHEN home_team_id=:hid THEN home_goals ELSE away_goals END)::NUMERIC, 2) AS avg_hg,
+                ROUND(AVG(CASE WHEN home_team_id=:aid THEN home_goals ELSE away_goals END)::NUMERIC, 2) AS avg_ag,
                 ROUND(AVG(CASE WHEN (home_goals + away_goals) > 2 THEN 1.0 ELSE 0.0 END)::NUMERIC, 3) AS o25,
                 ROUND(AVG(CASE WHEN home_goals > 0 AND away_goals > 0 THEN 1.0 ELSE 0.0 END)::NUMERIC, 3) AS btts
-            FROM "Matches"
-            WHERE home_team_id = :hid AND away_team_id = :aid
+            FROM "Matches" scope_m JOIN "Seasons" scope_s ON scope_s.id=scope_m.season_id JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league_slug
+            WHERE ((home_team_id=:hid AND away_team_id=:aid) OR (home_team_id=:aid AND away_team_id=:hid))
               AND status = 'FINISHED'
         """
-        h2h = self._db.execute(text(h2h_sql), {"hid": home_team_id, "aid": away_team_id}).fetchone()
+        h2h = self._execute(text(h2h_sql), {"hid": home_team_id, "aid": away_team_id}).fetchone()
 
         recent_sql = """
             SELECT
@@ -170,19 +177,19 @@ class TeamService:
                 m.status, m.outcome, m.home_goals, m.away_goals,
                 ht.id AS ht_id, ht.name AS ht_name, ht.logo_url AS ht_logo,
                 at.id AS at_id, at.name AS at_name, at.logo_url AS at_logo
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league_slug
             JOIN "Seasons" s ON s.id = m.season_id
             JOIN "Teams" ht  ON ht.id = m.home_team_id
             JOIN "Teams" at  ON at.id = m.away_team_id
-            WHERE m.home_team_id = :hid AND m.away_team_id = :aid
+            WHERE ((m.home_team_id=:hid AND m.away_team_id=:aid) OR (m.home_team_id=:aid AND m.away_team_id=:hid))
               AND m.status = 'FINISHED'
             ORDER BY m.match_datetime DESC
             LIMIT 5
         """
-        recent_rows = self._db.execute(text(recent_sql), {"hid": home_team_id, "aid": away_team_id}).fetchall()
+        recent_rows = self._execute(text(recent_sql), {"hid": home_team_id, "aid": away_team_id}).fetchall()
 
-        home_name = self._db.execute(text('SELECT name, logo_url FROM "Teams" WHERE id = :id'), {"id": home_team_id}).fetchone()
-        away_name = self._db.execute(text('SELECT name, logo_url FROM "Teams" WHERE id = :id'), {"id": away_team_id}).fetchone()
+        home_name = self._execute(text('SELECT name, logo_url FROM "Teams" WHERE id = :id'), {"id": home_team_id}).fetchone()
+        away_name = self._execute(text('SELECT name, logo_url FROM "Teams" WHERE id = :id'), {"id": away_team_id}).fetchone()
 
         return H2HResponse(
             home_team=TeamBriefSchema(id=home_team_id, name=home_name.name, logo_url=home_name.logo_url),
@@ -212,8 +219,12 @@ class TeamService:
 
     def _get_team_brief(self, team_id: int) -> TeamBriefSchema:
         """Fetch a minimal team record for embedding in responses."""
-        row = self._db.execute(
-            text('SELECT id, name, short_name, logo_url FROM "Teams" WHERE id = :tid'),
+        row = self._execute(
+            text('''SELECT t.id, t.name, t.short_name, t.logo_url FROM "Teams" t
+                WHERE t.id=:tid AND EXISTS (
+                    SELECT 1 FROM "Matches" m JOIN "Seasons" s ON s.id=m.season_id
+                    JOIN "Leagues" l ON l.id=s.league_id WHERE l.slug=:league_slug
+                    AND (m.home_team_id=t.id OR m.away_team_id=t.id))'''),
             {"tid": team_id},
         ).fetchone()
         if not row:
@@ -234,7 +245,7 @@ class TeamService:
                 SUM(CASE WHEN (m.home_team_id = :tid AND m.outcome = 'H') OR (m.away_team_id = :tid AND m.outcome = 'A') THEN 3
                          WHEN m.outcome = 'D' THEN 1 ELSE 0 END) AS pts,
                 SUM(CASE WHEN (m.home_team_id = :tid AND m.away_goals = 0) OR (m.away_team_id = :tid AND m.home_goals = 0) THEN 1 ELSE 0 END) AS cs
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league_slug
             JOIN "Seasons" s ON s.id = m.season_id
             WHERE (m.home_team_id = :tid OR m.away_team_id = :tid)
               AND m.status = 'FINISHED'
@@ -243,7 +254,7 @@ class TeamService:
             ORDER BY MAX(s.start_year) DESC
             LIMIT 1
         """
-        row = self._db.execute(text(sql), {"tid": team_id, "season": season_name}).fetchone()
+        row = self._execute(text(sql), {"tid": team_id, "season": season_name}).fetchone()
         if not row or not row.mp:
             return None
 
@@ -272,7 +283,7 @@ class TeamService:
                 CASE WHEN m.home_team_id = :tid THEN m.home_goals ELSE m.away_goals END AS gf,
                 CASE WHEN m.home_team_id = :tid THEN m.away_goals ELSE m.home_goals END AS ga,
                 m.outcome
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league_slug
             JOIN "Teams" ht ON ht.id = m.home_team_id
             JOIN "Teams" at ON at.id = m.away_team_id
             WHERE (m.home_team_id = :tid OR m.away_team_id = :tid)
@@ -280,7 +291,7 @@ class TeamService:
             ORDER BY m.match_datetime DESC
             LIMIT 5
         """
-        rows = self._db.execute(text(sql), {"tid": team_id}).fetchall()
+        rows = self._execute(text(sql), {"tid": team_id}).fetchall()
 
         entries = []
         for r in rows:
@@ -333,7 +344,7 @@ class TeamService:
                 SUM(CASE WHEN m.home_team_id = :tid THEN m.away_goals ELSE m.home_goals END) AS ga,
                 SUM(CASE WHEN (m.home_team_id = :tid AND m.outcome = 'H') OR (m.away_team_id = :tid AND m.outcome = 'A') THEN 3
                          WHEN m.outcome = 'D' THEN 1 ELSE 0 END) AS pts
-            FROM "Matches" m
+            FROM "Matches" m JOIN "Seasons" scope_s ON scope_s.id=m.season_id JOIN "Leagues" scope_l ON scope_l.id=scope_s.league_id AND scope_l.slug=:league_slug
             JOIN "Seasons" s ON s.id = m.season_id
             WHERE m.status = 'FINISHED'
               {location_filter}
@@ -342,7 +353,7 @@ class TeamService:
             ORDER BY MAX(s.start_year) DESC
             LIMIT 1
         """
-        row = self._db.execute(text(sql), {"tid": team_id, "season": season_name}).fetchone()
+        row = self._execute(text(sql), {"tid": team_id, "season": season_name}).fetchone()
         if not row or not row.mp:
             return None
 
