@@ -1,7 +1,8 @@
 'use client'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState, type ReactNode } from 'react'
+import { Suspense, useState, type ReactNode } from 'react'
+import { CompetitionProvider } from '@/lib/competition'
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -18,6 +19,6 @@ export function Providers({ children }: { children: ReactNode }) {
   )
 
   return (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}><Suspense fallback={<p className="page-frame py-8 text-white">Loading match centre…</p>}><CompetitionProvider>{children}</CompetitionProvider></Suspense></QueryClientProvider>
   )
 }
