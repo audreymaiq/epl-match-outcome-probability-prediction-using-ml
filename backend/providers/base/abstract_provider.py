@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Dict, List, Optional, Any
+from providers.base.components import ComponentStatus
 
 
 # ── Provider-agnostic raw data contracts ─────────────────────────────────────
@@ -50,15 +51,17 @@ class RawMatchBundle:
     lineups: Dict[str, Any]         # Starting XIs, substitutes, missing players
     statistics: Dict[str, Any]      # Shots, possession, xG, etc.
     provider_name: str              # "sofascore", "api_football", etc.
+    component_status: Dict[str, ComponentStatus] = field(default_factory=dict)
 
     def is_complete(self) -> bool:
-        """True if all 4 data sources are present (non-empty)."""
-        return all([self.detail, self.incidents, self.lineups, self.statistics])
+        """True when detail and all three requested component contracts are complete."""
+        return bool(self.detail) and all(self.component_status.get(name) == ComponentStatus.COMPLETE
+            for name in ("events", "lineups", "team_stats"))
 
     def completeness_score(self) -> float:
         """0.0 to 1.0 - how complete this bundle is."""
-        parts = [self.detail, self.incidents, self.lineups, self.statistics]
-        return sum(1 for p in parts if p) / len(parts)
+        return (int(bool(self.detail)) + sum(self.component_status.get(name) == ComponentStatus.COMPLETE
+                for name in ("events", "lineups", "team_stats"))) / 4
 
 
 # ── Abstract Provider Interface ───────────────────────────────────────────────
@@ -79,7 +82,7 @@ class AbstractDataProvider(ABC):
     @property
     @abstractmethod
     def tournament_id(self) -> int:
-        """Provider-specific EPL tournament identifier."""
+        """Provider-specific tournament identifier for the configured competition."""
 
     @abstractmethod
     def list_seasons(self) -> List[tuple[str, int]]:
