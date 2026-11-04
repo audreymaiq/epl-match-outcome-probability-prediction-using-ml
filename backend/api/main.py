@@ -14,7 +14,7 @@ Run locally:
     uvicorn api.main:app --reload --port 8000
 
 Production (Docker):
-    uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2
+    uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 1
 """
 
 from __future__ import annotations
@@ -52,12 +52,16 @@ artifact is installed.
 - **Referee tendencies** (home bias, card rate)
 - **Rest/fatigue** (days since last match)
 - **Derby detection** (local rivalry flag)
-- **Attack/defense strength** (Dixon-Coles style parameters)
+- **Attack/defense strength** (historical scoring rates)
 
 ### Model
 - 2-layer stacking: XGBoost + LightGBM + CatBoost → Logistic Regression
 - Isotonic probability calibration
-- Walk-forward cross-validation (no data leakage)
+- Chronological walk-forward cross-validation
+
+Competition scope is selected using the `league` query parameter. Historical
+backtests exclude the target's local matchday; corrected source history does
+not reconstruct the information originally available at each kickoff.
 """
 APP_VERSION = "1.0.0"
 
@@ -73,17 +77,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("API startup - loading prediction model...")
     try:
         svc = get_prediction_service()
-        svc.load_model()
         if svc.is_loaded:
             logger.info("Prediction model loaded (version=%s).", svc.model_version)
         else:
-            logger.warning("Model not found - predictions unavailable until training completes.")
+            logger.info("Prediction service initialized; active models are resolved per competition. Check /ready for readiness.")
     except Exception as exc:
         logger.error("Model load failed at startup: %s", exc, exc_info=True)
 
-    yield
-
-    logger.info("API shutdown.")
+    try:
+        yield
+    finally:
+        from utils.db_connector import DatabaseConnector
+        DatabaseConnector.close_all_connections()
+        get_prediction_service.cache_clear()
+        logger.info("API shutdown.")
 
 
 # ── Application factory ────────────────────────────────────────────────────────
@@ -155,6 +162,16 @@ def create_app() -> FastAPI:
     app.include_router(teams.router,       prefix=API_PREFIX)
     app.include_router(predictions.router, prefix=API_PREFIX)
     app.include_router(model.router,       prefix=API_PREFIX)
+    if os.getenv("ENABLE_PIPELINE_METRICS", "false").lower() == "true":
+        from monitoring.collector import register_metrics
+        register_metrics()
+    from config.competitions import competitions, get_competition
+
+    @app.get(f"{API_PREFIX}/leagues", tags=["Competitions"])
+    def list_competitions():
+        return [{"slug": item.slug, "name": item.name, "country": item.country,
+                 "timezone": item.timezone, "rounds": item.rounds,
+                 "is_default": item.slug == get_competition().slug} for item in competitions().values()]
 
     # Root redirect to docs
     @app.get("/", include_in_schema=False)
