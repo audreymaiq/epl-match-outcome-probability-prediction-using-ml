@@ -1,0 +1,9 @@
+# Shared training and serving runtime; update together and retrain/revalidate artifacts.
+numpy==1.26.4
+pandas==2.3.3
+scikit-learn==1.9.1
+xgboost-cpu==2.1.4
+lightgbm==4.7.0
+catboost==1.2.10
+scipy==1.17.1
+joblib==1.6.0
