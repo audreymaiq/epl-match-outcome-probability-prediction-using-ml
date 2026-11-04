@@ -1,7 +1,7 @@
 'use client'
 
 import { useParams } from 'next/navigation'
-import Link from 'next/link'
+import Link from '@/components/competition-link'
 import { ArrowLeft, ArrowRight, MapPin, Search, Trophy } from 'lucide-react'
 import { useTeam, useTeamForm, useTeamStats } from '@/lib/hooks'
 import { FormBadges } from '@/components/form-badges'
