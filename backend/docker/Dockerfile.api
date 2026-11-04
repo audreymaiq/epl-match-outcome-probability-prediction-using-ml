@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (layer caching - rebuild only when reqs change)
-COPY requirements-api.txt .
+COPY requirements-api.txt constraints-ml.txt ./
 
 # Install into a prefix dir (clean copy to runtime stage)
 RUN pip install --no-cache-dir --prefix=/install -r requirements-api.txt
@@ -39,6 +39,7 @@ LABEL description="FastAPI prediction API - Premier League match outcome probabi
 # Runtime-only system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -63,7 +64,7 @@ EXPOSE 8000
 
 # Health check (Docker HEALTHCHECK)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/live || exit 1
 
 # WEB_CONCURRENCY controls workers; each worker loads its own model copy.
 CMD ["uvicorn", "api.main:app", \
