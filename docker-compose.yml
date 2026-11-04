@@ -1,223 +1,191 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# Premier League Match Outcome Probability Prediction - Root Compose
-# Orchestrates: postgres, api, frontend, on-demand pipelines and monitoring
-#
-# Usage:
-#   docker compose up -d               → start all core services
-#   docker compose --profile pipeline run pipeline  → run ELT once
-#   docker compose logs -f api         → tail API logs
-# ═══════════════════════════════════════════════════════════════════════════════
+name: ${COMPOSE_PROJECT_NAME:-epl}
 
-# ── Shared environment anchors ────────────────────────────────────────────────
-x-common-env: &common-env
-  PYTHONUNBUFFERED: "1"
-  PYTHONIOENCODING: "utf-8"
-  TZ: "UTC"
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 x-backend-env: &backend-env
-  <<: *common-env
   DB_HOST: postgres
   DB_PORT: "5432"
   DB_NAME: ${DB_NAME:-epl_db}
   DB_USER: ${DB_USER:-epl_user}
   DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
-  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LEAGUE: ${LEAGUE:-epl}
+  LEAGUE_CONFIG_PATH: /app/config/leagues.json
+  ML_CONFIG_PATH: ${ML_CONFIG_PATH:-/app/ml/config/default.json}
+  RELEASE_POLICY_PATH: ${RELEASE_POLICY_PATH:-/app/ml/config/release.json}
+  MODEL_ROOT: /app/models
+  DATASET_ROOT: /app/data/datasets
   ENVIRONMENT: ${ENVIRONMENT:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  TZ: UTC
+
+x-api-build: &api-build
+  context: ./backend
+  dockerfile: docker/Dockerfile.api
+
+x-job: &job
+  image: ${COMPOSE_PROJECT_NAME:-epl}-pipeline:local
+  build:
+    context: ./backend
+    dockerfile: docker/Dockerfile.pipeline
+    args:
+      INSTALL_TRACKING: ${INSTALL_TRACKING:-0}
+  init: true
+  restart: "no"
+  environment: &job-env
+    <<: *backend-env
+    PROVIDER: ${PROVIDER:-sofascore}
+    API_FOOTBALL_KEY: ${API_FOOTBALL_KEY:-}
+    API_FOOTBALL_MAX_REQUESTS: ${API_FOOTBALL_MAX_REQUESTS:-1000}
+    SEASONS_TO_FETCH: ${SEASONS_TO_FETCH:-7}
+    SOFASCORE_PREMATCH_HOURS: ${SOFASCORE_PREMATCH_HOURS:-48}
+    SCRAPING_CONNECT_TIMEOUT: ${SCRAPING_CONNECT_TIMEOUT:-15}
+    SCRAPING_READ_TIMEOUT: ${SCRAPING_READ_TIMEOUT:-30}
+    SCRAPING_MAX_RETRIES: ${SCRAPING_MAX_RETRIES:-5}
+    SCRAPING_BACKOFF_FACTOR: ${SCRAPING_BACKOFF_FACTOR:-2.5}
+    SCRAPING_BROWSER_IMPERSONATE: ${SCRAPING_BROWSER_IMPERSONATE:-chrome110}
+    SCRAPING_IGNORE_SSL: "false"
+    SCRAPING_MIN_DELAY: ${SCRAPING_MIN_DELAY:-1}
+    SCRAPING_MAX_DELAY: ${SCRAPING_MAX_DELAY:-3}
+    MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-}
+  volumes:
+    - ./backend/config/leagues.json:/app/config/leagues.json:ro
+    - ./backend/ml/config:/app/ml/config:ro
+    - ./backend/models:/app/models
+    - ./backend/data/datasets:/app/data/datasets
+    - ./backend/logs:/app/logs
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  logging: *logging
 
 services:
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # PostgreSQL 17 - primary data store
-  # ─────────────────────────────────────────────────────────────────────────
   postgres:
     image: postgres:17-alpine
-    container_name: epl-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-epl_db}
       POSTGRES_USER: ${DB_USER:-epl_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+      TZ: UTC
     ports:
       - "127.0.0.1:${DB_PORT_HOST:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/docker/postgres/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - ./backend/docker/postgres/migrations/001_add_leagues_external_id.sql:/docker-entrypoint-initdb.d/02-migration-001.sql:ro
-      - ./backend/docker/postgres/migrations/002_add_elo_ratings.sql:/docker-entrypoint-initdb.d/03-migration-002.sql:ro
-      - ./backend/docker/postgres/migrations/003_add_match_id_to_squad_availability.sql:/docker-entrypoint-initdb.d/04-migration-003.sql:ro
-      - ./backend/docker/postgres/migrations/005_reconcile_feature_tables.sql:/docker-entrypoint-initdb.d/05-migration-005.sql:ro
-      - ./backend/docker/postgres/migrations/006_reconcile_match_loader.sql:/docker-entrypoint-initdb.d/06-migration-006.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-epl_user} -d ${DB_NAME:-epl_db}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
-    networks:
-      - epl-network
+    logging: *logging
 
   migrate:
-    image: postgres:17-alpine
+    image: ${COMPOSE_PROJECT_NAME:-epl}-api:local
+    build: *api-build
     restart: "no"
-    environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGDATABASE: ${DB_NAME:-epl_db}
-      PGUSER: ${DB_USER:-epl_user}
-      PGPASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
-    command: ["psql", "-v", "ON_ERROR_STOP=1", "-1", "-f", "/migrations/006_reconcile_match_loader.sql"]
-    volumes:
-      - ./backend/docker/postgres/migrations/006_reconcile_match_loader.sql:/migrations/006_reconcile_match_loader.sql:ro
+    environment: *backend-env
+    command: ["python", "-m", "football", "migrate"]
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - epl-network
+    logging: *logging
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # FastAPI Prediction API
-  # ─────────────────────────────────────────────────────────────────────────
   api:
-    build:
-      context: ./backend
-      dockerfile: docker/Dockerfile.api
-    container_name: epl-api
+    image: ${COMPOSE_PROJECT_NAME:-epl}-api:local
+    build: *api-build
+    init: true
     restart: unless-stopped
     environment:
       <<: *backend-env
-      MODEL_PATH: ${MODEL_PATH:-/app/models/ensemble_model.pkl}
       WEB_CONCURRENCY: ${API_WORKERS:-1}
+      FRONTEND_URL: ${FRONTEND_URL:-}
       ENABLE_METRICS: "true"
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
+      ENABLE_PIPELINE_METRICS: "true"
     volumes:
+      - ./backend/config/leagues.json:/app/config/leagues.json:ro
+      - ./backend/ml/config:/app/ml/config:ro
       - ./backend/models:/app/models:ro
       - ./backend/logs:/app/logs
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/live || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 60s
-    networks:
-      - epl-network
+    logging: *logging
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # ELT Pipeline runner (profile: pipeline - run once on demand)
-  # docker compose --profile pipeline run --rm pipeline
-  # ─────────────────────────────────────────────────────────────────────────
-  pipeline:
-    build:
-      context: ./backend
-      dockerfile: docker/Dockerfile.pipeline
-    container_name: epl-pipeline
-    restart: "no"
-    environment:
-      <<: *backend-env
-      SOFASCORE_EPL_ID: ${SOFASCORE_EPL_ID:-17}
-      PROVIDER: ${PROVIDER:-sofascore}
-    volumes:
-      - ./backend/logs:/app/logs
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    networks:
-      - epl-network
-    profiles:
-      - pipeline
-
-  features:
-    build:
-      context: ./backend
-      dockerfile: docker/Dockerfile.pipeline
-    restart: "no"
-    command: ["python", "-m", "ml.features.batch.orchestrator"]
-    environment:
-      <<: *backend-env
-      ML_CONFIG_PATH: ${ML_CONFIG_PATH:-/app/ml/config/default.json}
-    volumes:
-      - ./backend/ml/config:/app/ml/config:ro
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    networks:
-      - epl-network
-    profiles:
-      - pipeline
-
-  train:
-    build:
-      context: ./backend
-      dockerfile: docker/Dockerfile.pipeline
-    restart: "no"
-    command: ["python", "-m", "ml.training.train"]
-    environment:
-      <<: *backend-env
-      ML_CONFIG_PATH: ${ML_CONFIG_PATH:-/app/ml/config/default.json}
-    volumes:
-      - ./backend/models:/app/models
-      - ./backend/ml/config:/app/ml/config:ro
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    networks:
-      - epl-network
-    profiles:
-      - training
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Next.js Frontend
-  # ─────────────────────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
       args:
-        API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
-    container_name: epl-frontend
+        API_INTERNAL_URL: http://api:8000
+    init: true
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
+      API_INTERNAL_URL: http://api:8000
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
-    networks:
-      - epl-network
+    logging: *logging
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Prometheus - metrics scraping
-  # ─────────────────────────────────────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:v2.48.1
-    container_name: epl-prometheus
+  cli:
+    <<: *job
+    entrypoint: ["python", "-m", "football"]
+    command: ["--help"]
+    profiles: [operations]
+
+  pipeline:
+    <<: *job
+    command: ["python", "-m", "football", "pipeline", "run"]
+    profiles: [pipeline]
+
+  features:
+    <<: *job
+    command: ["python", "-m", "football", "features"]
+    profiles: [pipeline]
+
+  train:
+    <<: *job
+    command: ["python", "-m", "football", "train"]
+    profiles: [training]
+
+  scheduler:
+    <<: *job
+    command: ["python", "-m", "operations.scheduler"]
     restart: unless-stopped
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
+    environment:
+      <<: *job-env
+      SCHEDULE_INTERVAL_SECONDS: ${SCHEDULE_INTERVAL_SECONDS:-21600}
+      SCHEDULE_TIMEOUT_SECONDS: ${SCHEDULE_TIMEOUT_SECONDS:-10800}
+      SCHEDULE_SEASON_COUNT: ${SCHEDULE_SEASON_COUNT:-1}
+    profiles: [scheduler]
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d", "--storage.tsdb.retention.size=1GB"]
     ports:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./backend/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
-    networks:
-      - epl-network
+    profiles: [monitoring]
+    logging: *logging
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Grafana - dashboards
-  # ─────────────────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:10.2.3
-    container_name: epl-grafana
+    image: grafana/grafana:13.3.0
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
@@ -229,26 +197,12 @@ services:
       - grafana_data:/var/lib/grafana
       - ./backend/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./backend/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      - prometheus
-    networks:
-      - epl-network
+    depends_on: [prometheus]
+    profiles: [monitoring]
+    logging: *logging
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Networks
-# ─────────────────────────────────────────────────────────────────────────────
-networks:
-  epl-network:
-    driver: bridge
-    name: epl-network
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Named volumes (survive container restarts)
-# ─────────────────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
-    name: epl-postgres-data
+    name: ${POSTGRES_VOLUME_NAME:-epl-postgres-data}
   prometheus_data:
-    name: epl-prometheus-data
   grafana_data:
-    name: epl-grafana-data
