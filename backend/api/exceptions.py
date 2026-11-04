@@ -16,7 +16,7 @@ class ModelNotLoadedException(HTTPException):
     def __init__(self):
         super().__init__(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "MODEL_NOT_LOADED", "message": "Install a trained model artifact and restart the API."},
+            detail={"code": "MODEL_NOT_LOADED", "message": "Train and activate a compatible model for this competition."},
         )
 
 
