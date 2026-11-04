@@ -11,8 +11,8 @@ venv/
 cache/
 logs/
 data/raw/*.csv
-models/*.pkl
-models/*.joblib
+models/
+data/datasets/
 scripts/
 *.sqlite
 *.sqlite3
