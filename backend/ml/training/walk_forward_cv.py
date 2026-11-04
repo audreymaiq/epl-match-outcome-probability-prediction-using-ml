@@ -176,6 +176,9 @@ class WalkForwardCV:
             if len(train_idx) < self._min_train_matches or len(test_idx) < self._min_test_matches:
                 continue
 
+            if df.loc[train_idx, date_col].max() >= df.loc[test_idx, date_col].min():
+                raise ValueError("Training seasons overlap evaluation timestamps; chronological evaluation would leak future data")
+
             splits.append((np.array(train_idx), np.array(test_idx)))
 
         logger.info("WalkForwardCV: %d folds generated.", len(splits))
