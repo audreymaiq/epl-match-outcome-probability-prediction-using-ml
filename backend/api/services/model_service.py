@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from config.competitions import get_competition
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,13 @@ class ModelService:
             "walk_forward_folds": meta.get("walk_forward_folds"),
             "cv_metrics": meta.get("cv_metrics", {}),
             "baseline_cv_metrics": meta.get("baseline_cv_metrics", {}),
+            "frequency_cv_metrics": meta.get("frequency_cv_metrics", {}),
+            "league": meta.get("league"),
+            "dataset_id": meta.get("dataset_id"),
+            "data_time_policy": meta.get("data_time_policy"),
         }
 
-    def get_performance(self, session: Session, model_version: Optional[str] = None) -> Dict[str, Any]:
+    def get_performance(self, session: Session, model_version: Optional[str] = None, league: str | None = None) -> Dict[str, Any]:
         """
         Compute prediction accuracy from stored predictions vs actual outcomes.
         Requires a Predictions table - returns empty metrics if not available.
@@ -44,7 +49,9 @@ class ModelService:
                 SELECT p.*, COALESCE(m.outcome::text, p.actual_outcome) AS result_outcome
                 FROM "Predictions" p
                 JOIN "Matches" m ON m.id = p.match_id
-                WHERE :model_version IS NULL OR p.model_version = :model_version
+                JOIN "Seasons" s ON s.id=m.season_id
+                JOIN "Leagues" l ON l.id=s.league_id
+                WHERE l.slug=:league AND (:model_version IS NULL OR p.model_version = :model_version)
             )
             SELECT
                 COUNT(*) AS total,
@@ -61,7 +68,7 @@ class ModelService:
                     POWER(away_win_prob - CASE WHEN result_outcome = 'A' THEN 1 ELSE 0 END, 2)
                 ) / 3.0) FILTER (WHERE result_outcome IS NOT NULL) AS brier_score
             FROM scored
-        """), {"model_version": model_version}).fetchone()
+        """), {"model_version": model_version, "league": league or get_competition().slug}).fetchone()
         if not row or not row.total:
             return {"total_predictions": 0, "evaluated": 0, "accuracy": None, "log_loss": None, "brier_score": None}
 
