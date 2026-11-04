@@ -1,0 +1,14 @@
+{
+  "epl": {
+    "name": "Premier League",
+    "country": "England",
+    "timezone": "Europe/London",
+    "season_format": "cross_year",
+    "rounds": 38,
+    "season_count": 7,
+    "early_fraction": 0.2631578947368421,
+    "late_fraction": 0.7368421052631579,
+    "winter_months": [11, 12, 1, 2],
+    "providers": {"sofascore": 17, "api_football": 39}
+  }
+}
