@@ -29,7 +29,7 @@ class RefereeComputer(AbstractFeatureComputer):
     def name(self) -> str:
         return "RefereeStats"
 
-    def compute(self, session: Session, season_name: Optional[str] = None) -> int:
+    def compute(self, session: Session, season_name: Optional[str] = None, *, league_id=None, competition=None, config=None) -> int:
         logger.info("Computing RefereeStats (cumulative, all-time).")
 
         sql = """
@@ -60,9 +60,10 @@ class RefereeComputer(AbstractFeatureComputer):
                 ROUND(AVG(
                     CASE WHEN hist.outcome = 'D' THEN 1.0 ELSE 0.0 END
                 )::NUMERIC, 3)   AS draw_rate
-            FROM "Matches" anchor
+            FROM "Matches" anchor JOIN "Seasons" scope_s ON scope_s.id=anchor.season_id AND scope_s.league_id=:league_id
             JOIN "Matches" hist ON
                 hist.referee_id = anchor.referee_id
+                AND hist.season_id IN (SELECT id FROM "Seasons" WHERE league_id=:league_id)
                 AND hist.match_datetime < anchor.match_datetime
                 AND hist.status = 'FINISHED'
             WHERE anchor.referee_id IS NOT NULL
@@ -93,7 +94,7 @@ class RefereeComputer(AbstractFeatureComputer):
             computed_at       = NOW()
         """
 
-        result = session.execute(text(sql))
+        result = session.execute(text(sql), {"league_id": league_id})
         rows = result.rowcount
         logger.info("RefereeStats: upserted %d rows.", rows)
         return rows
