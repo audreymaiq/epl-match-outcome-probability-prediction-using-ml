@@ -20,6 +20,9 @@ Design:
 """
 
 import logging
+import hashlib
+import json
+from dataclasses import asdict
 from contextlib import contextmanager
 from typing import Dict, Any, List, Optional, Generator
 
@@ -43,6 +46,8 @@ from elt_pipeline.transform.data_structures import (
     ParsedMatchTeamStats,
 )
 from utils.external_mapping import get_internal_id, upsert_mapping
+from config.competitions import Competition
+from providers.base.components import ComponentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +66,12 @@ class MatchLoader(AbstractLoader):
             loader.bulk_load(bundles)
     """
 
-    def __init__(self, session: Session, source_system: str):
+    def __init__(self, session: Session, source_system: str, competition: Competition | None = None):
         if not source_system or not source_system.strip():
             raise ValueError("source_system is required for external ID mapping.")
         self._session = session
         self.SOURCE_SYSTEM = source_system.strip()
+        self._competition = competition
         # In-memory cache: "entity_type:external_id" -> internal_id
         # Avoids N+1 DB lookups for the same team/player across many matches.
         self._cache: Dict[str, int] = {}
@@ -152,7 +158,20 @@ class MatchLoader(AbstractLoader):
         # 2. Upsert Match (core row)
         match_id = self._upsert_match(match, season_id, home_id, away_id, stadium_id, referee_id)
 
-        # 3. Load child entities in the same transaction as the match.
+        # COMPLETE is an authoritative snapshot, including an empty snapshot.
+        tables = {"events": "MatchEvents", "lineups": "Lineups",
+                  "squad_availability": "SquadAvailability", "player_stats": "MatchPlayerStats",
+                  "team_stats": "MatchTeamStats"}
+        for component, table in tables.items():
+            status = bundle.component_status.get(component)
+            if status is not None and status != ComponentStatus.COMPLETE:
+                if getattr(bundle, component):
+                    raise LoaderError(f"Cannot write {component} with status {status}")
+                continue
+            if status == ComponentStatus.COMPLETE:
+                self._session.execute(text(f'DELETE FROM "{table}" WHERE match_id = :id'), {"id": match_id})
+
+        # Legacy callers without component_status keep their previous merge semantics.
         self._load_events(
             bundle.events, match_id, home_id, away_id,
             match.home_team.external_id, match.away_team.external_id,
@@ -161,6 +180,32 @@ class MatchLoader(AbstractLoader):
         self._load_squad_availability(bundle.squad_availability, match_id)
         self._load_player_stats(bundle.player_stats, match_id)
         self._load_team_stats(bundle.team_stats, match_id, home_id, away_id)
+        if bundle.component_status.get("squad_availability") == ComponentStatus.COMPLETE:
+            for team_external_id, team_id in ((match.home_team.external_id, home_id), (match.away_team.external_id, away_id)):
+                absent = [item for item in bundle.squad_availability if item.team.external_id == team_external_id]
+                self._session.execute(text('''INSERT INTO "AvailabilityObservations"
+                    (match_id, team_id, absences, goalkeeper_absent)
+                    SELECT :match, :team, :count, :gk WHERE CURRENT_TIMESTAMP < :kickoff
+                    ON CONFLICT DO NOTHING'''), {"match": match_id, "team": team_id, "count": len(absent),
+                    "gk": any(item.player.position and item.player.position.value == "GK" for item in absent), "kickoff": match.match_datetime})
+
+        content_hash = hashlib.sha256(json.dumps(asdict(bundle), sort_keys=True, default=str).encode()).hexdigest()
+        self._session.execute(text('''INSERT INTO "IngestionObservations"
+            (match_id, source_system, content_hash, component_status) VALUES (:id, :source, :hash, CAST(:status AS jsonb))
+            ON CONFLICT (match_id) DO UPDATE SET observed_at=now(), source_system=EXCLUDED.source_system,
+                content_hash=EXCLUDED.content_hash, component_status=EXCLUDED.component_status'''),
+            {"id": match_id, "source": self.SOURCE_SYSTEM, "hash": content_hash,
+             "status": json.dumps(bundle.component_status)})
+        self._session.execute(text('''INSERT INTO "IngestionSnapshots"
+            (match_id, source_system, content_hash, payload) VALUES (:id, :source, :hash, CAST(:payload AS jsonb))
+            ON CONFLICT (match_id, source_system, content_hash) DO NOTHING'''),
+            {"id": match_id, "source": self.SOURCE_SYSTEM, "hash": content_hash,
+             "payload": json.dumps(bundle.raw_payload or asdict(bundle), default=str)})
+        if bundle.summary_hash:
+            self._session.execute(text('''INSERT INTO "SourceMatchState" (match_id, source_system, summary_hash)
+                VALUES (:id, :source, :hash) ON CONFLICT (match_id, source_system)
+                DO UPDATE SET summary_hash=EXCLUDED.summary_hash, checked_at=now()'''),
+                {"id": match_id, "source": self.SOURCE_SYSTEM, "hash": bundle.summary_hash})
 
         return match_id
 
@@ -172,21 +217,24 @@ class MatchLoader(AbstractLoader):
             return cached
 
         if internal_id := get_internal_id(str(league.external_id), "league", self.SOURCE_SYSTEM, self._session):
+            if self._competition:
+                actual = self._session.execute(text('SELECT slug FROM "Leagues" WHERE id=:id'), {"id": internal_id}).scalar_one()
+                if actual != self._competition.slug:
+                    raise LoaderError("Provider tournament mapping belongs to a different competition")
             self._cache[cache_key] = internal_id
             return internal_id
 
         internal_id = self._session.execute(text("""
-            INSERT INTO "Leagues" (name, country, external_id)
-            VALUES (:name, :country, :ext_id)
-            ON CONFLICT (name) DO UPDATE SET
+            INSERT INTO "Leagues" (name, country, slug)
+            VALUES (:name, :country, :slug)
+            ON CONFLICT (slug) DO UPDATE SET
                 country     = EXCLUDED.country,
-                external_id = COALESCE("Leagues".external_id, EXCLUDED.external_id),
                 updated_at  = NOW()
             RETURNING id
         """), {
-            "name":    league.name.strip(),
-            "country": (league.country or "Unknown").strip(),
-            "ext_id":  league.external_id,
+            "name": self._competition.name if self._competition else league.name.strip(),
+            "country": self._competition.country if self._competition else (league.country or "Unknown").strip(),
+            "slug": self._competition.slug if self._competition else f"{self.SOURCE_SYSTEM}_{league.external_id}",
         }).scalar_one()
 
         upsert_mapping(str(league.external_id), internal_id, "league", self.SOURCE_SYSTEM, session=self._session)
@@ -194,11 +242,11 @@ class MatchLoader(AbstractLoader):
         return internal_id
 
     def _upsert_season(self, season: ParsedSeason, league_id: int) -> int:
-        cache_key = f"season:{season.external_id}"
+        cache_key = f"season:{league_id}:{season.external_id}"
         if cached := self._cache.get(cache_key):
             return cached
 
-        if internal_id := get_internal_id(str(season.external_id), "season", self.SOURCE_SYSTEM, self._session):
+        if internal_id := get_internal_id(str(season.external_id), "season", self.SOURCE_SYSTEM, self._session, scope=str(league_id)):
             self._cache[cache_key] = internal_id
             return internal_id
 
@@ -216,7 +264,7 @@ class MatchLoader(AbstractLoader):
             "ey":   season.end_year,
         }).scalar_one()
 
-        upsert_mapping(str(season.external_id), internal_id, "season", self.SOURCE_SYSTEM, session=self._session)
+        upsert_mapping(str(season.external_id), internal_id, "season", self.SOURCE_SYSTEM, session=self._session, scope=str(league_id))
         self._cache[cache_key] = internal_id
         return internal_id
 
@@ -234,10 +282,6 @@ class MatchLoader(AbstractLoader):
         internal_id = self._session.execute(text("""
             INSERT INTO "Stadiums" (name, city, capacity, latitude, longitude)
             VALUES (:name, :city, :cap, :lat, :lng)
-            ON CONFLICT (name) DO UPDATE SET
-                city       = COALESCE(EXCLUDED.city, "Stadiums".city),
-                capacity   = COALESCE(EXCLUDED.capacity, "Stadiums".capacity),
-                updated_at = NOW()
             RETURNING id
         """), {
             "name": stadium.name,
@@ -266,10 +310,6 @@ class MatchLoader(AbstractLoader):
         internal_id = self._session.execute(text("""
             INSERT INTO "Teams" (name, short_name, stadium_id, logo_url, established_year)
             VALUES (:name, :short, :stadium_id, :logo, :year)
-            ON CONFLICT (name) DO UPDATE SET
-                short_name  = COALESCE(EXCLUDED.short_name, "Teams".short_name),
-                logo_url    = COALESCE(EXCLUDED.logo_url, "Teams".logo_url),
-                updated_at  = NOW()
             RETURNING id
         """), {
             "name":      team.name,
@@ -398,7 +438,7 @@ class MatchLoader(AbstractLoader):
                 :hthg, :htag,
                 :att
             )
-            ON CONFLICT (match_datetime, home_team_id, away_team_id)
+            ON CONFLICT (season_id, match_datetime, home_team_id, away_team_id)
             DO UPDATE SET
                 season_id            = EXCLUDED.season_id,
                 match_week           = EXCLUDED.match_week,
