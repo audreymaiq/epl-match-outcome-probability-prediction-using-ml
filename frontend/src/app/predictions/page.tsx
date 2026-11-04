@@ -1,6 +1,6 @@
 'use client'
 
-import Link from 'next/link'
+import Link from '@/components/competition-link'
 import { useState } from 'react'
 import { ArrowLeft, ArrowRight, ChartNoAxesCombined, CircleCheck, CircleX } from 'lucide-react'
 import { usePredictions } from '@/lib/hooks'
