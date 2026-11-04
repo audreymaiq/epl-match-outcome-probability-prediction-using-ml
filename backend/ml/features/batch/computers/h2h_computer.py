@@ -34,7 +34,7 @@ class H2HComputer(AbstractFeatureComputer):
     def name(self) -> str:
         return "HeadToHeadStats"
 
-    def compute(self, session: Session, season_name: Optional[str] = None) -> int:
+    def compute(self, session: Session, season_name: Optional[str] = None, *, league_id=None, competition=None, config=None) -> int:
         logger.info("Computing HeadToHeadStats (all-time, both directions).")
 
         # For each anchor match (hid vs aid), find ALL historical meetings
@@ -76,7 +76,7 @@ class H2HComputer(AbstractFeatureComputer):
                     THEN 1.0 ELSE 0.0 END)::NUMERIC, 3)      AS over_2_5_rate,
                 ROUND(AVG(CASE WHEN hist.home_goals > 0 AND hist.away_goals > 0
                     THEN 1.0 ELSE 0.0 END)::NUMERIC, 3)      AS btts_rate
-            FROM "Matches" anchor
+            FROM "Matches" anchor JOIN "Seasons" scope_s ON scope_s.id=anchor.season_id AND scope_s.league_id=:league_id
             JOIN "Matches" hist ON
                 -- Both directions: hist involves the same two teams as anchor
                 (
@@ -84,6 +84,7 @@ class H2HComputer(AbstractFeatureComputer):
                     OR
                     (hist.home_team_id = anchor.away_team_id AND hist.away_team_id = anchor.home_team_id)
                 )
+                AND hist.season_id IN (SELECT id FROM "Seasons" WHERE league_id=:league_id)
                 AND hist.match_datetime < anchor.match_datetime
                 AND hist.status = 'FINISHED'
                 AND hist.home_goals IS NOT NULL
@@ -121,7 +122,7 @@ class H2HComputer(AbstractFeatureComputer):
             computed_at     = NOW()
         """
 
-        result = session.execute(text(sql))
+        result = session.execute(text(sql), {"league_id": league_id})
         rows = result.rowcount
         logger.info("HeadToHeadStats: upserted %d rows.", rows)
         return rows
