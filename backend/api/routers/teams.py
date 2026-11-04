@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_db
+from api.dependencies import get_db, get_competition_dep
 from api.services.team_service import TeamService
 from api.schemas.team import (
     TeamSchema, TeamDetailSchema, TeamFormResponse, TeamStatsResponse, H2HResponse,
@@ -25,8 +25,9 @@ def list_teams(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    competition=Depends(get_competition_dep),
 ):
-    svc = TeamService(db)
+    svc = TeamService(db, competition=competition)
     items, total = svc.list_teams(search=search, page=page, page_size=page_size)
     total_pages = -(-total // page_size)
     return PagedResponse(
@@ -44,8 +45,9 @@ def head_to_head(
     home_team_id: int = Query(..., description="Internal ID of the home team"),
     away_team_id: int = Query(..., description="Internal ID of the away team"),
     db: Session = Depends(get_db),
+    competition=Depends(get_competition_dep),
 ):
-    svc = TeamService(db)
+    svc = TeamService(db, competition=competition)
     return svc.get_h2h(home_team_id, away_team_id)
 
 
@@ -58,8 +60,9 @@ def get_team(
     team_id: int,
     season: Optional[str] = Query(None, description='Season name, e.g. "2023/24"'),
     db: Session = Depends(get_db),
+    competition=Depends(get_competition_dep),
 ):
-    svc = TeamService(db)
+    svc = TeamService(db, competition=competition)
     return svc.get_team_detail(team_id, season_name=season)
 
 
@@ -71,8 +74,9 @@ def get_team(
 def get_team_form(
     team_id: int,
     db: Session = Depends(get_db),
+    competition=Depends(get_competition_dep),
 ):
-    svc = TeamService(db)
+    svc = TeamService(db, competition=competition)
     return svc.get_team_form(team_id)
 
 
@@ -85,6 +89,7 @@ def get_team_stats(
     team_id: int,
     season: Optional[str] = Query(None, description='Season name, e.g. "2023/24"'),
     db: Session = Depends(get_db),
+    competition=Depends(get_competition_dep),
 ):
-    svc = TeamService(db)
+    svc = TeamService(db, competition=competition)
     return svc.get_team_stats(team_id, season_name=season)
